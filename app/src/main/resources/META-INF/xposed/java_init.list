@@ -3,4 +3,4 @@
 # 无需在 AndroidManifest.xml 中声明 xposedmodule meta-data。
 # Gradle packaging 中 `resources.merges += "META-INF/xposed/*"` 允许多模块依赖
 # 合并各自的入口声明到同一文件。
-com.athena.xposed.hook.ModuleMain
+com.swipeguard.xposed.hook.ModuleMain

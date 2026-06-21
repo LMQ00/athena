@@ -1,9 +1,5 @@
--dontwarn io.github.libxposed.annotation.**
--adaptresourcefilecontents META-INF/xposed/java_init.list
-
-# ---- Xposed 模块入口保留规则 ----
-# 保留所有 XposedModule 子类的构造器及 libxposed 框架回调方法
--keep,allowoptimization,allowobfuscation class * extends io.github.libxposed.api.XposedModule {
+# libxposed XposedModule 保留（所有生命周期回调方法）
+-keep class * extends io.github.libxposed.api.XposedModule {
     public <init>();
     public void onSystemServerStarting(...);
     public void onModuleLoaded(...);
@@ -11,29 +7,20 @@
     public void onPackageReady(...);
 }
 
-# ---- kotlinx.serialization 保留规则 ----
-# 保留序列化器生成的伴生对象和内部类，避免反序列化时找不到 serializer
+# kotlinx.serialization：保留所有 @Serializable 类的序列化器
 -keepattributes *Annotation*, InnerClasses
--keepclassmembers class kotlinx.serialization.json.** {
+-keep,includedescriptorclasses class com.swipeguard.xposed.model.**$$serializer { *; }
+-keepclassmembers class com.swipeguard.xposed.model.** {
     *** Companion;
 }
--keepclasseswithmembers class kotlinx.serialization.json.** {
-    kotlinx.serialization.KSerializer serializer(...);
-}
--keep,includedescriptorclasses class com.athena.xposed.model.**$$serializer { *; }
--keepclassmembers class com.athena.xposed.model.** {
-    *** Companion;
-}
--keepclasseswithmembers class com.athena.xposed.model.** {
+-keepclasseswithmembers class com.swipeguard.xposed.model.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
 
-# ---- 资源压缩保护 ----
-# R 内部类可能被反射引用（Xposed 框架等不感知 R8）
+# R8 资源压缩保留 R 类
 -keep class **.R$* { *; }
 
-# ---- Jetpack Compose 保留规则 ----
--keep,allowobfuscation class androidx.compose.** { *; }
+# Compose 保留
 -keepclasseswithmembers class * {
     @androidx.compose.runtime.Composable <methods>;
 }

@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.athena.xposed"
+    namespace = "com.swipeguard.xposed"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.athena.xposed"
+        applicationId = "com.swipeguard.xposed"
         minSdk = 26
         targetSdk = 37
         versionCode = 1

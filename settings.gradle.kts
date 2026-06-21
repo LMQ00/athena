@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "Athena"
+rootProject.name = "SwipeGuard"
 include(":app")
