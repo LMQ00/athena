@@ -5,13 +5,14 @@ import com.swipeguard.xposed.data.RemoteConfigRepository
 import com.swipeguard.xposed.model.SwipeGuardConfig
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
-import java.lang.reflect.Method
 
 /**
- * Athena 杀进程拦截 Hook。
+ * 划卡杀进程拦截 Hook。
  *
- * 逆向 Athena 6.0.1 APK 发现 Athena 使用自有 API 而非 AOSP 标准方法。
- * 动态查找实现类并 Hook athenaKill / clearProcess。
+ * 逆向 Athena 6.0.1 APK 发现：
+ * - Athena 使用自有 API 而非 AOSP 标准方法
+ * - 优先尝试 Hook athenaKill/clearProcess（在 system_server 的框架类上）
+ * - 失败则回退到 AOSP killBackgroundProcesses/forceStopPackage
  */
 class SwipeKillHooks(private val module: XposedModule) {
 
@@ -23,110 +24,89 @@ class SwipeKillHooks(private val module: XposedModule) {
     }
 
     fun install() {
-        var n = 0
-        for (m in listOf("athenaKill", "athenaKill2", "clearProcess")) {
-            if (tryHookAthena(m)) n++
-        }
-        if (n == 0) {
+        // 先试 Athena 自有 API
+        if (!hookAthenaKill("athenaKill") &&
+            !hookAthenaKill("athenaKill2") &&
+            !hookAthenaKill("clearProcess")) {
+            // 都不行 → 回退 AOSP
             module.log(Log.WARN, tag, "Athena API not found, fallback to AOSP")
-            fallbackAosp()
-        } else {
-            module.log(Log.INFO, tag, "Hooked $n Athena methods")
+            hookAospKillProcesses()
         }
     }
 
-    private fun tryHookAthena(methodName: String): Boolean {
-        for (cls in listOf(
+    /** 尝试在 system_server 框架类中 Hook athena 方法。 */
+    private fun hookAthenaKill(methodName: String): Boolean {
+        for (clsName in listOf(
             "com.oplus.athena.systemservice.OplusAthenaSystemService",
             "com.android.server.am.OplusAthenaAmManager",
-            "oplus.app.AthenaServiceInternal",
+            "oplus.app.AthenaServiceInternal"
         )) {
             try {
-                val clz = Class.forName(cls)
+                val clz = Class.forName(clsName)
                 for (m in clz.declaredMethods) {
                     if (m.name != methodName) continue
-                    doHook(m, methodName) { chain ->
-                        val pkg = findPkg(m, chain)
-                        if (pkg != null && config.enabled && pkg in config.protectedApps) {
-                            module.log(Log.INFO, tag, "Blocked $methodName for $pkg")
-                            null  // skip
-                        } else {
+                    module.hook(m)
+                        .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                        .intercept { chain ->
+                            val pkg = findPkgFromMethod(m, chain)
+                            if (pkg != null && config.enabled && pkg in config.protectedApps) {
+                                module.log(Log.INFO, tag, "Blocked $methodName for $pkg")
+                                return@intercept null
+                            }
                             chain.proceed()
-                            Unit
                         }
-                    }
                 }
+                module.log(Log.INFO, tag, "Hooked $clsName.$methodName")
                 return true
             } catch (_: ClassNotFoundException) { }
-              catch (t: Throwable) {
-                module.log(Log.DEBUG, tag, "$cls.$methodName: ${t.message}")
-            }
+              catch (_: Throwable) { }
         }
         return false
     }
 
-    /** 拦截闭包：返回 null 跳过原方法，否则返回 proceed 结果。 */
-    private fun doHook(method: Method, name: String, block: (XposedInterface.HookChain) -> Any?) {
-        module.hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-            .intercept { chain ->
-                val r = block(chain)
-                if (r == null) return@intercept defaultReturn(method.returnType)
-                r
-            }
-        module.log(Log.INFO, tag, "Hooked $name")
-    }
-
-    /** 从参数中找包名。 */
-    private fun findPkg(method: Method, chain: XposedInterface.HookChain): String? {
+    /** 从方法参数中提取包名。 */
+    private fun findPkgFromMethod(method: java.lang.reflect.Method,
+                                   chain: XposedInterface.HookChain): String? {
         try {
             val types = method.parameterTypes
+            // 先找 String 参数（包名）
             for (i in types.indices) {
-                val t = types[i]
-                if (t == String::class.java) {
+                if (types[i] == String::class.java) {
                     val v = chain.getArg(i) as? String
                     if (v != null && "." in v && !v.startsWith("android.")) return v
                 }
             }
-            // Bundle 参数
+            // 再找 Bundle 参数
             for (i in types.indices) {
                 if (types[i].name == "android.os.Bundle") {
                     val b = chain.getArg(i) as? android.os.Bundle ?: continue
                     for (k in listOf("pkg", "KEY_PKG_NAME", "caller_package")) {
-                        b.getString(k)?.let { if ("." in it && !it.startsWith("android.")) return it }
+                        b.getString(k)?.let { if ("." in it) return it }
                     }
                 }
             }
-        } catch (_: Throwable) {}
+        } catch (_: Throwable) { }
         return null
     }
 
-    private fun defaultReturn(ret: Class<*>): Any? {
-        if (ret == Void.TYPE || ret.name == "void") return null
-        if (ret == Int::class.javaPrimitiveType) return 0
-        if (ret == Boolean::class.javaPrimitiveType) return false
-        if (ret == Long::class.javaPrimitiveType) return 0L
-        return null
-    }
-
-    /** 回退到标准 AOSP 方法。 */
-    private fun fallbackAosp() {
-        try {
-            val ams = Class.forName("com.android.server.am.ActivityManagerService")
-            for (name in listOf("killBackgroundProcesses", "forceStopPackage")) {
-                try {
-                    val m = ams.getDeclaredMethod(name, String::class.java)
-                    doHook(m, name) { chain ->
+    /** 回退：Hook AOSP 标准杀进程方法。 */
+    private fun hookAospKillProcesses() {
+        for (name in listOf("killBackgroundProcesses", "forceStopPackage")) {
+            try {
+                val ams = Class.forName("com.android.server.am.ActivityManagerService")
+                val method = ams.getDeclaredMethod(name, String::class.java)
+                module.hook(method)
+                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                    .intercept { chain ->
                         val pkg = chain.getArg(0) as? String
                         if (pkg != null && config.enabled && pkg in config.protectedApps) {
-                            null
-                        } else {
-                            chain.proceed()
-                            Unit
+                            module.log(Log.INFO, tag, "AOSP blocked $name for $pkg")
+                            return@intercept null
                         }
+                        chain.proceed()
                     }
-                } catch (_: NoSuchMethodException) { }
-            }
-        } catch (_: ClassNotFoundException) { }
+                module.log(Log.INFO, tag, "AOSP fallback hooked $name")
+            } catch (_: Throwable) { }
+        }
     }
 }
