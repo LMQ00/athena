@@ -178,9 +178,12 @@ private fun AddAppDialog(
     var searchQuery by remember { mutableStateOf("") }
     var showSystemApps by remember { mutableStateOf(false) }
     
-    val installedApps = remember {
+    val installedApps = remember(showSystemApps, currentPackages) {
         context.packageManager.getInstalledApplications(0)
-            .filter { !showSystemApps && (it.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 || showSystemApps }
+            .filter {
+                if (showSystemApps) true
+                else (it.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0
+            }
             .filter { it.packageName !in currentPackages }
             .sortedBy { context.packageManager.getApplicationLabel(it).toString() }
     }
@@ -207,7 +210,18 @@ private fun AddAppDialog(
                     singleLine = true
                 )
                 Spacer(Modifier.height(8.dp))
-                
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Checkbox(
+                        checked = showSystemApps,
+                        onCheckedChange = { showSystemApps = it }
+                    )
+                    Text("显示系统应用", style = MaterialTheme.typography.bodySmall)
+                }
+
                 LazyColumn(
                     modifier = Modifier.heightIn(max = 400.dp)
                 ) {
