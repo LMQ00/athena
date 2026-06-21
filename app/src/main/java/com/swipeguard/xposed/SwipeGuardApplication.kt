@@ -12,9 +12,7 @@ class SwipeGuardApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // 只在 UI 进程初始化，不在 :xposed_service 进程中初始化
-        if (processName?.endsWith(":xposed_service") != true) {
-            // 后续可在这里初始化 ViewModel 或 Config 仓储
-        }
+        // Application 入口（UI 进程）；Hook 进程由 ModuleMain 驱动，
+        // 此处无需做进程隔离。后续可在此初始化 ViewModel / Config 仓储。
     }
 }
