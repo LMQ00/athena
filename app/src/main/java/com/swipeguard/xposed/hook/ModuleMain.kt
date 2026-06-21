@@ -47,10 +47,13 @@ class ModuleMain : XposedModule() {
     /** 配置仓储引用，持有以维持监听器生命周期。 */
     private lateinit var configRepo: RemoteConfigRepository
 
-    /** 划卡杀进程拦截 Hook（实例化以持有可变的 config 快照）。 */
+    /** AOSP 标准杀进程拦截 Hook。 */
     private lateinit var swipeKillHooks: SwipeKillHooks
 
-    /** 系统服务辅助保活 Hook（实例化以持有可变的 config 快照）。 */
+    /** Athena 自有 API 杀进程拦截 Hook。 */
+    private lateinit var athenaKillHooks: AthenaKillHooks
+
+    /** 系统服务辅助保活 Hook。 */
     private lateinit var systemServiceHooks: SystemServiceHooks
 
     /**
@@ -117,6 +120,15 @@ class ModuleMain : XposedModule() {
                 log(Log.ERROR, TAG, "SwipeKillHooks install failed.", t)
             }
 
+            // Athena 自有 API 拦截（如找到 athenaKill 则优先于此路径保护）
+            try {
+                athenaKillHooks = AthenaKillHooks(this)
+                athenaKillHooks.syncConfig(configRepo)
+                athenaKillHooks.install()
+            } catch (t: Throwable) {
+                log(Log.ERROR, TAG, "AthenaKillHooks install failed.", t)
+            }
+
             try {
                 systemServiceHooks = SystemServiceHooks(this)
                 systemServiceHooks.syncConfig(configRepo)
@@ -127,7 +139,7 @@ class ModuleMain : XposedModule() {
 
             log(
                 Log.INFO, TAG,
-                "All hooks installed. Protected apps: ${config.protectedApps.size}"
+                "All hooks installed (SwipeKill + AthenaKill + OplusCfg + SystemService). Protected: ${config.protectedApps.size}"
             )
         } catch (t: Throwable) {
             // 顶层兜底：任何未预期异常都仅记录，绝不让 system_server 崩溃。
@@ -139,11 +151,12 @@ class ModuleMain : XposedModule() {
      * 配置热更新时同步各实例化 Hook 的内部快照。
      *
      * [OplusConfigHooks] 为 object 且 install 时捕获 config 快照，不在此处
-     * 刷新（与任务规格一致）；仅 [SwipeKillHooks] / [SystemServiceHooks]
+     * 刷新（与任务规格一致）；仅 [SwipeKillHooks] / [AthenaKillHooks] / [SystemServiceHooks]
      * 通过 syncConfig(repo) 重新加载配置。
      */
     private fun syncHooks() {
         if (::swipeKillHooks.isInitialized) swipeKillHooks.syncConfig(configRepo)
+        if (::athenaKillHooks.isInitialized) athenaKillHooks.syncConfig(configRepo)
         if (::systemServiceHooks.isInitialized) systemServiceHooks.syncConfig(configRepo)
     }
 
