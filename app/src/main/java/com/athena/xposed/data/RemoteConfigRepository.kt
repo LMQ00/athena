@@ -31,7 +31,7 @@ import io.github.libxposed.service.XposedService
  * - 经 [XposedService] 构造时，[XposedService.getRemotePreferences] 失败
  *   （如服务已死）会抛出 [XposedService.ServiceException]，由上层决定降级策略。
  */
-class RemoteConfigRepository private constructor(
+class RemoteConfigRepository(
     private val prefs: SharedPreferences,
 ) : IConfigRepository {
 
@@ -46,13 +46,6 @@ class RemoteConfigRepository private constructor(
     constructor(service: XposedService, prefsName: String) : this(
         prefs = service.getRemotePreferences(prefsName)
     )
-
-    /**
-     * Hook 进程构造：直接传入由 `XposedInterface#getRemotePreferences` 返回的
-     * [SharedPreferences]。适用于 system_server 等无法访问 `libxposed-service`
-     * [XposedService] 的被 Hook 进程。
-     */
-    constructor(prefs: SharedPreferences) : this(prefs = prefs)
 
     /** 用户回调到 SharedPreferences 监听器的映射，便于精确注销。 */
     private val listeners: MutableMap<(AthenaConfig) -> Unit, SharedPreferences.OnSharedPreferenceChangeListener> =

@@ -36,7 +36,6 @@ interface IConfigRepository {
      * 加载当前配置。反序列化失败时实现应回退到 [AthenaConfig.DEFAULT]，
      * **不得**抛出异常导致宿主进程崩溃。
      */
-    @Synchronized
     fun load(): AthenaConfig
 
     /**

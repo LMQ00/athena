@@ -123,7 +123,7 @@ object OplusConfigHooks {
         }
 
         val handle = module.hook(method)
-            .setExceptionMode(XposedInterface.ExceptionMode.NEUTRAL)
+            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
             .intercept { chain ->
                 // 默认放行原始逻辑
                 val result = chain.proceed()
@@ -215,7 +215,7 @@ object OplusConfigHooks {
 
         for (ctor in ctors) {
             val h = module.hook(ctor)
-                .setExceptionMode(XposedInterface.ExceptionMode.NEUTRAL)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .intercept { chain ->
                     // 先让真实构造执行（打开底层 fd），再决定是否劫持
                     chain.proceed()

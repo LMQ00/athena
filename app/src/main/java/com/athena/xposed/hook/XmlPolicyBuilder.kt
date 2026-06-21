@@ -5,7 +5,6 @@ import com.athena.xposed.model.FreezePolicy
 import org.w3c.dom.Document
 import org.w3c.dom.Element
 import java.io.StringWriter
-import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.transform.OutputKeys
 import javax.xml.transform.TransformerFactory
@@ -121,7 +120,7 @@ object XmlPolicyBuilder {
         // 关闭外部实体解析，防御 XXE（system_server 内风险有限，仍遵循最小信任）。
         // Android 的 XML 实现可能不支持部分 Xerces 特性名，逐项 try-catch，
         // 任一特性不可用不应阻止 DOM 解析本身。
-        runCatching { factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "") }
+                runCatching { factory.setAttribute("http://javax.xml.XMLConstants/property/accessExternalDTD", "") }
         runCatching { factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
         runCatching { factory.setFeature("http://xml.org/sax/features/external-general-entities", false) }
         runCatching { factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false) }.onFailure {
