@@ -13,8 +13,7 @@ class SwipeGuardApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         // 只在 UI 进程初始化，不在 :xposed_service 进程中初始化
-        val processName = android.os.Process.getProcessName()
-        if (!processName.endsWith(":xposed_service")) {
+        if (processName?.endsWith(":xposed_service") != true) {
             // 后续可在这里初始化 ViewModel 或 Config 仓储
         }
     }

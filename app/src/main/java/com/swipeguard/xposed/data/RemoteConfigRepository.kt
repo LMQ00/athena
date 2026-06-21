@@ -54,7 +54,7 @@ class RemoteConfigRepository(
 
     @Synchronized
     override fun load(): SwipeGuardConfig = try {
-        val jsonStr = prefs.getString(KEY_CONFIG_JSON, null)
+        val jsonStr = prefs.getString(IConfigRepository.KEY_CONFIG_JSON, null)
         if (jsonStr.isNullOrEmpty()) SwipeGuardConfig.DEFAULT else JsonCodec.decode(jsonStr)
     } catch (t: Throwable) {
         // 解析失败 / Binder 异常：安全回退，保证宿主进程不崩溃。

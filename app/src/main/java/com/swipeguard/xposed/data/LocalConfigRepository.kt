@@ -35,11 +35,11 @@ class LocalConfigRepository(
 
     @Synchronized
     override fun load(): SwipeGuardConfig = try {
-        val jsonStr = prefs.getString(KEY_CONFIG_JSON, null)
+        val jsonStr = prefs.getString(IConfigRepository.KEY_CONFIG_JSON, null)
         if (jsonStr.isNullOrEmpty()) SwipeGuardConfig.DEFAULT else JsonCodec.decode(jsonStr)
     } catch (t: Throwable) {
         // 解析失败：安全回退默认配置，同时备份损坏的 JSON 以便排查。
-        val jsonStr = prefs.getString(KEY_CONFIG_JSON, null)
+        val jsonStr = prefs.getString(IConfigRepository.KEY_CONFIG_JSON, null)
         if (jsonStr != null) {
             runCatching {
                 prefs.edit().putString(KEY_CONFIG_BAK, jsonStr).apply()
@@ -50,7 +50,7 @@ class LocalConfigRepository(
     }
 
     override fun save(config: SwipeGuardConfig) {
-        prefs.edit().putString(KEY_CONFIG_JSON, JsonCodec.encode(config)).apply()
+        prefs.edit().putString(IConfigRepository.KEY_CONFIG_JSON, JsonCodec.encode(config)).apply()
     }
 
     override fun observeChanges(listener: (SwipeGuardConfig) -> Unit) {
@@ -59,7 +59,7 @@ class LocalConfigRepository(
             val spListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
                 // 直接解析 JSON，避免调用 @Synchronized 的 load() 导致自我等待。
                 val cfg = try {
-                    val jsonStr = prefs.getString(KEY_CONFIG_JSON, null)
+                    val jsonStr = prefs.getString(IConfigRepository.KEY_CONFIG_JSON, null)
                     if (jsonStr.isNullOrEmpty()) SwipeGuardConfig.DEFAULT else JsonCodec.decode(jsonStr)
                 } catch (t: Throwable) {
                     SwipeGuardConfig.DEFAULT

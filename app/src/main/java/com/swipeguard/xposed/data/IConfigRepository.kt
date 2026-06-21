@@ -3,14 +3,6 @@ package com.swipeguard.xposed.data
 import com.swipeguard.xposed.model.SwipeGuardConfig
 
 /**
- * SharedPreferences 中存储 [SwipeGuardConfig] JSON 字符串的 key。
- *
- * UI 进程与 Hook 进程必须使用相同的 key，否则跨进程同步将失效。
- * 该常量为包级私有，仅由 [LocalConfigRepository] 与 [RemoteConfigRepository] 共享。
- */
-internal const val KEY_CONFIG_JSON: String = "swipeguard_config_json"
-
-/**
  * 配置仓储接口。
  *
  * 抽象出 UI 进程（本地 SharedPreferences）与 Hook 进程（XposedService
@@ -55,4 +47,13 @@ interface IConfigRepository {
 
     /** 释放底层资源（监听器、Binder 引用等）。 */
     fun close()
+
+    companion object {
+        /**
+         * SharedPreferences 中存储 [SwipeGuardConfig] JSON 字符串的 key。
+         *
+         * UI 进程与 Hook 进程必须使用相同的 key，否则跨进程同步将失效。
+         */
+        const val KEY_CONFIG_JSON: String = "swipeguard_config_json"
+    }
 }
