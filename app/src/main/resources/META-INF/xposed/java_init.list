@@ -1,0 +1,6 @@
+# libxposed 现代 API 模块入口声明。
+# 框架在 APK 的 META-INF/xposed/java_init.list 中查找入口类全限定名并自动实例化，
+# 无需在 AndroidManifest.xml 中声明 xposedmodule meta-data。
+# Gradle packaging 中 `resources.merges += "META-INF/xposed/*"` 允许多模块依赖
+# 合并各自的入口声明到同一文件。
+com.athena.xposed.hook.ModuleMain
