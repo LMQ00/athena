@@ -14,3 +14,4 @@ local.properties
 *.aab
 *.jks
 *.keystore
+gradle-8.9-*.zip
