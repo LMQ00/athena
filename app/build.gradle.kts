@@ -7,12 +7,12 @@ plugins {
 
 android {
     namespace = "com.athena.xposed"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.athena.xposed"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 37
         versionCode = 1
         versionName = "1.0.0"
     }
