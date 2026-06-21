@@ -1,4 +1,5 @@
 minApiVersion=101
 targetApiVersion=101
-# 移除 staticScope=true，让用户在 LSPosed 中手动选择作用域（system）
+staticScope=true
 autoHotReload=true
+
