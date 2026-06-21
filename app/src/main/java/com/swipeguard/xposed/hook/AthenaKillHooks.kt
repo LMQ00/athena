@@ -5,6 +5,7 @@ import com.swipeguard.xposed.data.RemoteConfigRepository
 import com.swipeguard.xposed.model.SwipeGuardConfig
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
+import java.lang.reflect.Method
 
 /**
  * Athena 自有 API 拦截 Hook。
@@ -65,15 +66,15 @@ class AthenaKillHooks(private val module: XposedModule) {
         }
     }
 
-    private fun shouldBlock(method: java.lang.reflect.Method,
-                            chain: XposedInterface.HookChain): Boolean {
+    private fun shouldBlock(method: Method,
+                            chain: XposedInterface.Chain): Boolean {
         if (!config.enabled) return false
         val pkg = findPkg(method, chain)
         return pkg != null && pkg in config.protectedApps
     }
 
-    private fun findPkg(method: java.lang.reflect.Method,
-                        chain: XposedInterface.HookChain): String? {
+    private fun findPkg(method: Method,
+                        chain: XposedInterface.Chain): String? {
         try {
             val types = method.parameterTypes
             // 在所有 String 参数中找包名
