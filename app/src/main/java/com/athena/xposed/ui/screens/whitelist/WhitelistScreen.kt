@@ -248,9 +248,6 @@ fun WhitelistScreen(navController: NavController) {
 }
 
 /**
-
-
-/**
  * 构建 3 个 Tab 的标签（含数量）。
  */
 private fun buildTabs(all: List<AppEntry>): List<TabLabel> = listOf(
