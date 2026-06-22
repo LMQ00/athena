@@ -30,11 +30,11 @@ class SwipeKillHooks(private val module: XposedModule,
     private var enabled: Boolean = true
     private val tag = "SwipeGuard/SwipeKill"
 
-    /** 从配置仓储同步配置，计算有效白名单 */
+    /** 从配置仓储同步配置，计算有效白名单（systemDefaults 已在 config JSON 中） */
     fun syncConfig(repo: RemoteConfigRepository) {
         val cfg = repo.load()
         enabled = cfg.enabled
-        effectiveSet = (repo.loadSystemDefaults() - cfg.userRemovals) + cfg.userAdditions
+        effectiveSet = cfg.effectiveProtectedApps
     }
 
     /** 安装 Hook（三路径） */

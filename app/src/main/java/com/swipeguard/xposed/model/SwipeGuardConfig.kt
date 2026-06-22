@@ -33,6 +33,14 @@ data class SwipeGuardConfig(
     var userRemovals: Set<String> = emptySet(),
 
     /**
+     * 系统默认白名单（从 ColorOS sys_elsa_config_list.xml 中提取的 OEM 预设包名）。
+     *
+     * 由 Hook 进程 ([OplusConfigHooks]) 在启动时主动读取 XML 提取并写入 config JSON，
+     * 随后通过跨进程 SharedPreferences 同步到 UI 进程。
+     */
+    var systemDefaults: Set<String> = emptySet(),
+
+    /**
      * 写入 <whitePkg category="..."/> 的 category 编码。
      *
      * 三位独立编码（每位表示一个维度）：
@@ -46,8 +54,8 @@ data class SwipeGuardConfig(
     val schemaVersion: Int = 2
 ) {
     /** 计算有效白名单：系统默认 - 用户移除 + 用户添加 */
-    fun effectiveProtectedApps(systemDefaults: Set<String>): Set<String> =
-        (systemDefaults - userRemovals) + userAdditions
+    val effectiveProtectedApps: Set<String>
+        get() = (systemDefaults - userRemovals) + userAdditions
 
     companion object {
         /** 空配置默认值 */

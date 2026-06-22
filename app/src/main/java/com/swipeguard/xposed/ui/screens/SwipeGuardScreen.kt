@@ -92,7 +92,7 @@ fun SwipeGuardScreen() {
             Spacer(Modifier.height(8.dp))
 
             // 等待 / 空 / 列表 状态
-            if (effectiveApps.isEmpty() && uiState.systemDefaults.isEmpty()) {
+            if (effectiveApps.isEmpty() && uiState.config.systemDefaults.isEmpty()) {
                 // system_server 的 Hook 尚未写入系统默认白名单
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -141,7 +141,7 @@ fun SwipeGuardScreen() {
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     items(effectiveApps.sorted(), key = { it }) { pkg ->
-                        val isSystemDefault = pkg in uiState.systemDefaults
+                        val isSystemDefault = pkg in uiState.config.systemDefaults
                         val isUserAdded = pkg in uiState.config.userAdditions
 
                         Card(
@@ -197,7 +197,7 @@ fun SwipeGuardScreen() {
 
     // 删除确认
     showDeleteConfirm?.let { pkg ->
-        val isSystemDefault = pkg in uiState.systemDefaults
+        val isSystemDefault = pkg in uiState.config.systemDefaults
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = null },
             title = { Text("确认移除") },

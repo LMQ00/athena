@@ -14,20 +14,20 @@ import kotlinx.coroutines.launch
 /**
  * 单例 ViewModel，管理 SwipeGuard 配置状态。
  *
- * 双层白名单架构：
- * - [systemDefaults]：从 ColorOS 原始 XML 提取的 OEM 预设白名单（由 Hook 进程写入）
- * - [config.userAdditions] / [config.userRemovals]：用户的增删操作
+ * 有效白名单配置在 [SwipeGuardConfig] 中统一管理：
+ * - [SwipeGuardConfig.systemDefaults]：从 ColorOS 原始 XML 提取的 OEM 预设白名单
+ *   （由 Hook 进程主动提取并写入 config JSON）
+ * - [SwipeGuardConfig.userAdditions] / [SwipeGuardConfig.userRemovals]：用户的增删操作
  * - [UiState.effectiveProtectedApps]：有效白名单 = (systemDefaults - userRemovals) + userAdditions
  */
 object SwipeGuardViewModel : ViewModel() {
 
     data class UiState(
         val config: SwipeGuardConfig = SwipeGuardConfig.DEFAULT,
-        val systemDefaults: Set<String> = emptySet(),
     ) {
         /** 有效白名单 = 系统默认 - 用户移除 + 用户添加 */
         val effectiveProtectedApps: Set<String>
-            get() = (systemDefaults - config.userRemovals) + config.userAdditions
+            get() = config.effectiveProtectedApps
     }
 
     private lateinit var repository: LocalConfigRepository
@@ -38,9 +38,7 @@ object SwipeGuardViewModel : ViewModel() {
         if (::repository.isInitialized) return
         repository = LocalConfigRepository(app)
 
-        // 订阅配置和系统默认白名单变更（跨进程热更新）
-        // observeChanges 监听所有 key，当 config 或 system_defaults 变化时
-        // 重新加载完整状态
+        // 订阅配置变更（跨进程热更新），systemDefaults 已内嵌在 config JSON 中
         repository.observeChanges { _ -> load() }
 
         load()
@@ -48,12 +46,7 @@ object SwipeGuardViewModel : ViewModel() {
 
     fun load() {
         viewModelScope.launch(Dispatchers.IO) {
-            val config = repository.load()
-            val defaults = repository.loadSystemDefaults()
-            _state.value = UiState(
-                config = config,
-                systemDefaults = defaults,
-            )
+            _state.value = UiState(config = repository.load())
         }
     }
 
@@ -89,16 +82,16 @@ object SwipeGuardViewModel : ViewModel() {
      */
     fun removePackage(pkg: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val current = _state.value
+            val current = _state.value.config
             val nextConfig = if (pkg in current.systemDefaults) {
                 // 是系统默认 → 标记移除
-                current.config.copy(userRemovals = current.config.userRemovals + pkg)
+                current.copy(userRemovals = current.userRemovals + pkg)
             } else {
                 // 是用户添加 → 直接删除
-                current.config.copy(userAdditions = current.config.userAdditions - pkg)
+                current.copy(userAdditions = current.userAdditions - pkg)
             }
             repository.save(nextConfig)
-            _state.value = current.copy(config = nextConfig)
+            _state.value = UiState(config = nextConfig)
         }
     }
 }

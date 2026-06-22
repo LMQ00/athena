@@ -33,20 +33,6 @@ class LocalConfigRepository(
         mutableMapOf()
     private val listenersLock = Any()
 
-    override fun loadSystemDefaults(): Set<String> {
-        val json = prefs.getString(IConfigRepository.KEY_SYSTEM_DEFAULTS, null) ?: return emptySet()
-        return try {
-            JsonCodec.decodeSet(json)
-        } catch (t: Throwable) {
-            Log.e(TAG, "Failed to decode system defaults", t)
-            emptySet()
-        }
-    }
-
-    override fun saveSystemDefaults(pkgs: Set<String>) {
-        prefs.edit().putString(IConfigRepository.KEY_SYSTEM_DEFAULTS, JsonCodec.encodeSet(pkgs)).apply()
-    }
-
     @Synchronized
     override fun load(): SwipeGuardConfig = try {
         val jsonStr = prefs.getString(IConfigRepository.KEY_CONFIG_JSON, null)

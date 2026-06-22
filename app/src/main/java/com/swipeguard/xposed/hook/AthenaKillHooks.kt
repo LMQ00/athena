@@ -29,7 +29,7 @@ class AthenaKillHooks(private val module: XposedModule,
     fun syncConfig(repo: RemoteConfigRepository) {
         val cfg = repo.load()
         enabled = cfg.enabled
-        effectiveSet = (repo.loadSystemDefaults() - cfg.userRemovals) + cfg.userAdditions
+        effectiveSet = cfg.effectiveProtectedApps
     }
 
     fun install() {

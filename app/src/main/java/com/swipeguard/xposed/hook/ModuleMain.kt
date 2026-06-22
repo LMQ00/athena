@@ -83,12 +83,9 @@ class ModuleMain : XposedModule() {
             config = configRepo.load()
 
             // 2. 订阅配置热更新：UI 进程改写 SharedPreferences 后，框架在 Binder
-            //    线程回调。监听 config JSON 和 system_defaults 两个 key 的变更。
+            //    线程回调。监听 config JSON（systemDefaults 已内嵌其中）的变更。
             prefs.registerOnSharedPreferenceChangeListener { _, key ->
-                if (key == IConfigRepository.KEY_CONFIG_JSON ||
-                    key == IConfigRepository.KEY_SYSTEM_DEFAULTS ||
-                    key == null
-                ) {
+                if (key == IConfigRepository.KEY_CONFIG_JSON || key == null) {
                     try {
                         config = configRepo.load()
                         syncHooks()
@@ -150,13 +147,12 @@ class ModuleMain : XposedModule() {
     /**
      * 配置热更新时同步各 Hook 的内部快照。
      *
-     * 从 [configRepo] 加载最新配置和系统默认白名单，计算有效白名单后
+     * 从 [configRepo] 加载最新配置（systemDefaults 已内嵌其中），计算有效白名单后
      * 同步给 [OplusConfigHooks] / [SwipeKillHooks] / [AthenaKillHooks]。
      */
     private fun syncHooks() {
-        val systemDefaults = configRepo.loadSystemDefaults()
         // OplusConfigHooks 通过 updateConfig 热更新白名单，无需重新 install
-        OplusConfigHooks.updateConfig(config, systemDefaults)
+        OplusConfigHooks.updateConfig(config)
         if (::swipeKillHooks.isInitialized) swipeKillHooks.syncConfig(configRepo)
         if (::athenaKillHooks.isInitialized) athenaKillHooks.syncConfig(configRepo)
         // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7

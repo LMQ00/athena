@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import com.swipeguard.xposed.data.IConfigRepository
-import com.swipeguard.xposed.data.JsonCodec
 import com.swipeguard.xposed.model.SwipeGuardConfig
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
@@ -53,13 +52,6 @@ object OplusConfigHooks {
      */
     @Volatile
     private var currentEffectiveSet: Set<String> = emptySet()
-
-    /**
-     * 系统默认白名单缓存 —— 最后一次写入 SharedPreferences 的值，
-     * 用于避免每次读取 XML 都重复写入。
-     */
-    @Volatile
-    private var lastWrittenSystemDefaults: Set<String>? = null
 
     /**
      * RemotePreferences 实例，由 [install] 传入。
@@ -116,65 +108,91 @@ object OplusConfigHooks {
     ) {
         remotePrefs = prefs
 
-        // 初始化时从 prefs 加载已缓存的系统默认白名单
-        val defaults = loadSystemDefaultsFromPrefs()
         currentConfig = config
-        currentEffectiveSet = (defaults - config.userRemovals) + config.userAdditions
-        lastWrittenSystemDefaults = defaults
+        currentEffectiveSet = (config.systemDefaults - config.userRemovals) + config.userAdditions
 
         installOplusSettingsReadConfig(module, config, classLoader, handles)
         installElsaConfigFileInputStream(module, config, handles)
+
+        // 主动读取系统 XML，提取系统默认白名单并写入 config JSON
+        // 即使 FileInputStream Hook 未触发（系统在 Hook 安装前已读取 XML），
+        // 也能确保 systemDefaults 被写入 config JSON
+        extractAndPersistSystemDefaults(module)
     }
 
     /**
      * 热更新配置快照。由 [ModuleMain.syncHooks] 在配置热加载后调用，
-     * 替换 [currentConfig] 并重新计算有效白名单。
-     *
-     * @param config          最新 SwipeGuard 配置
-     * @param systemDefaults  最新系统默认白名单（从 SharedPreferences 读取）
+     * 替换 [currentConfig] 并重新计算有效白名单（systemDefaults 已在 config 中）。
      */
-    fun updateConfig(config: SwipeGuardConfig, systemDefaults: Set<String>) {
+    fun updateConfig(config: SwipeGuardConfig) {
         currentConfig = config
-        currentEffectiveSet = (systemDefaults - config.userRemovals) + config.userAdditions
+        currentEffectiveSet = (config.systemDefaults - config.userRemovals) + config.userAdditions
     }
 
     // ------------------------------------------------------------------
-    // 系统默认白名单持久化
+    // 系统默认白名单持久化（直接写入 config JSON，无需独立 key）
     // ------------------------------------------------------------------
 
-    /** 从 SharedPreferences 读取系统默认白名单。 */
-    private fun loadSystemDefaultsFromPrefs(): Set<String> {
-        val prefs = remotePrefs ?: return emptySet()
-        val json = prefs.getString(IConfigRepository.KEY_SYSTEM_DEFAULTS, null) ?: return emptySet()
-        return try {
-            JsonCodec.decodeSet(json)
+    /**
+     * 将 XML 中的系统默认白名单提取并写入 config JSON。
+     *
+     * 读取当前 config JSON（含用户增删），合并 systemDefaults 后写回。
+     * 仅在 systemDefaults 发生变化时写入，避免无谓的 Binder 调用。
+     *
+     * @param xml 原始 ELSA 策略 XML 内容
+     */
+    private fun persistSystemDefaults(module: XposedModule, xml: String) {
+        try {
+            val defaults = XmlPolicyBuilder.extractWhitePkgNames(xml)
+            if (defaults.isEmpty()) {
+                module.log(Log.DEBUG, TAG, "No whitePkg entries found in ELSA config")
+                return
+            }
+
+            val prefs = remotePrefs ?: return
+            val currentJson = prefs.getString(IConfigRepository.KEY_CONFIG_JSON, null) ?: return
+            val parsedConfig = SwipeGuardConfig.fromJson(currentJson)
+            // 只有 systemDefaults 变化时才写入（避免无谓的 Binder 调用）
+            if (parsedConfig.systemDefaults == defaults) return
+
+            val updatedConfig = parsedConfig.copy(systemDefaults = defaults)
+            prefs.edit()
+                .putString(IConfigRepository.KEY_CONFIG_JSON, SwipeGuardConfig.toJson(updatedConfig))
+                .apply()
+
+            // 更新内存中的 currentConfig 和 currentEffectiveSet
+            this.currentConfig = updatedConfig
+            this.currentEffectiveSet =
+                (defaults - updatedConfig.userRemovals) + updatedConfig.userAdditions
+
+            module.log(
+                Log.INFO, TAG,
+                "System defaults persisted: ${defaults.size} packages " +
+                "(userAdditions=${updatedConfig.userAdditions.size}, userRemovals=${updatedConfig.userRemovals.size})"
+            )
         } catch (t: Throwable) {
-            Log.e(TAG, "Failed to decode system defaults", t)
-            emptySet()
+            module.log(Log.WARN, TAG, "Failed to persist system defaults", t)
         }
     }
 
     /**
-     * 提取系统默认白名单并写入 SharedPreferences（仅在变化时写入）。
+     * 主动读取 ELSA 策略 XML 文件，提取系统默认白名单并写入 config JSON。
      *
-     * 由 [hijackStream] 在每次读取原始 XML 后调用。
+     * 由 [install] 在安装完所有 Hook 后调用，作为首要保障路径
+     * （与 [hijackStream] 中的二次提取协作）。
      */
-    private fun writeSystemDefaultsIfChanged(newDefaults: Set<String>) {
-        if (newDefaults.isEmpty()) return
-        val last = lastWrittenSystemDefaults ?: emptySet()
-        if (newDefaults == last) return
-
-        val prefs = remotePrefs ?: return
-        prefs.edit()
-            .putString(IConfigRepository.KEY_SYSTEM_DEFAULTS, JsonCodec.encodeSet(newDefaults))
-            .apply()
-        lastWrittenSystemDefaults = newDefaults
-
-        // 重新计算有效白名单
-        val cfg = currentConfig
-        currentEffectiveSet = (newDefaults - cfg.userRemovals) + cfg.userAdditions
-
-        Log.i(TAG, "System defaults updated: ${last.size} → ${newDefaults.size} entries")
+    private fun extractAndPersistSystemDefaults(module: XposedModule) {
+        try {
+            val file = File(ELSA_CONFIG_PATH)
+            if (!file.exists()) {
+                module.log(Log.DEBUG, TAG, "ELSA config not found: $ELSA_CONFIG_PATH")
+                return
+            }
+            val xml = file.readText(Charsets.UTF_8)
+            persistSystemDefaults(module, xml)
+        } catch (t: Throwable) {
+            module.log(Log.WARN, TAG, "Failed to extract system defaults proactively", t)
+        }
     }
 
     // ------------------------------------------------------------------
@@ -484,9 +502,8 @@ object OplusConfigHooks {
         val originalBytes = fis.readBytes()
         val originalXml = String(originalBytes, Charsets.UTF_8)
 
-        // 提取系统默认白名单，仅在变化时写入 SharedPreferences
-        val systemDefaults = XmlPolicyBuilder.extractWhitePkgNames(originalXml)
-        writeSystemDefaultsIfChanged(systemDefaults)
+        // 提取系统默认白名单并写入 config JSON（二次保障：若 XML 运行时热更新）
+        persistSystemDefaults(module, originalXml)
 
         val cfg = currentConfig
         val effectiveSet = currentEffectiveSet
@@ -506,7 +523,7 @@ object OplusConfigHooks {
         module.log(
             Log.INFO, TAG,
             "Elsa config hijacked: original=${originalBytes.size}B enhanced=${enhancedBytes.size}B " +
-            "systemDefaults=${systemDefaults.size} effective=${effectiveSet.size}"
+            "systemDefaults=${currentConfig.systemDefaults.size} effective=${effectiveSet.size}"
         )
     }
 
