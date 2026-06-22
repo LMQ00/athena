@@ -2,7 +2,6 @@ package com.swipeguard.xposed.hook
 
 import android.util.Log
 import com.swipeguard.xposed.data.RemoteConfigRepository
-import com.swipeguard.xposed.model.SwipeGuardConfig
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import java.lang.reflect.Method
@@ -18,13 +17,19 @@ import java.lang.reflect.Method
  * - 每个 Hook 都在独立 try-catch 中
  * - 所有反射操作容错，找不到类/方法就跳过
  */
-class AthenaKillHooks(private val module: XposedModule) {
+class AthenaKillHooks(private val module: XposedModule,
+                      private val classLoader: ClassLoader) {
 
-    private var config: SwipeGuardConfig = SwipeGuardConfig.DEFAULT
+    @Volatile
+    private var effectiveSet: Set<String> = emptySet()
+    @Volatile
+    private var enabled: Boolean = true
     private val tag = "SwipeGuard/AthenaKill"
 
     fun syncConfig(repo: RemoteConfigRepository) {
-        config = repo.load()
+        val cfg = repo.load()
+        enabled = cfg.enabled
+        effectiveSet = (repo.loadSystemDefaults() - cfg.userRemovals) + cfg.userAdditions
     }
 
     fun install() {
@@ -41,7 +46,7 @@ class AthenaKillHooks(private val module: XposedModule) {
         )
         for (clsName in candidates) {
             try {
-                val clz = Class.forName(clsName)
+                val clz = Class.forName(clsName, false, classLoader)
                 var hooked = false
                 for (m in clz.declaredMethods) {
                     if (m.name != methodName) continue
@@ -50,7 +55,7 @@ class AthenaKillHooks(private val module: XposedModule) {
                         .intercept { chain ->
                             if (shouldBlock(m, chain)) {
                                 module.log(Log.INFO, tag, "Blocked $methodName")
-                                return@intercept null
+                                return@intercept 0
                             }
                             chain.proceed()
                         }
@@ -68,9 +73,9 @@ class AthenaKillHooks(private val module: XposedModule) {
 
     private fun shouldBlock(method: Method,
                             chain: XposedInterface.Chain): Boolean {
-        if (!config.enabled) return false
+        if (!enabled) return false
         val pkg = findPkg(method, chain)
-        return pkg != null && pkg in config.protectedApps
+        return pkg != null && pkg in effectiveSet
     }
 
     private fun findPkg(method: Method,

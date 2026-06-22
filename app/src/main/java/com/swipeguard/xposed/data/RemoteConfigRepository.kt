@@ -52,6 +52,21 @@ class RemoteConfigRepository(
         mutableMapOf()
     private val listenersLock = Any()
 
+    override fun loadSystemDefaults(): Set<String> {
+        val json = prefs.getString(IConfigRepository.KEY_SYSTEM_DEFAULTS, null) ?: return emptySet()
+        return try {
+            JsonCodec.decodeSet(json)
+        } catch (t: Throwable) {
+            emptySet()
+        }
+    }
+
+    override fun saveSystemDefaults(pkgs: Set<String>) {
+        throw UnsupportedOperationException(
+            "RemoteConfigRepository is read-only in Hook process; system defaults must be written by UI process."
+        )
+    }
+
     @Synchronized
     override fun load(): SwipeGuardConfig = try {
         val jsonStr = prefs.getString(IConfigRepository.KEY_CONFIG_JSON, null)

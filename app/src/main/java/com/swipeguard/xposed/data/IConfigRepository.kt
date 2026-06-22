@@ -36,6 +36,22 @@ interface IConfigRepository {
     fun save(config: SwipeGuardConfig)
 
     /**
+     * 加载系统默认白名单（从 ColorOS 原始 XML 中提取的 OEM 预设包名）。
+     * 由 [OplusConfigHooks] 在首次读取冻结策略 XML 时写入。
+     *
+     * @return 系统默认白名单包名集合；未初始化时返回空集合。
+     */
+    fun loadSystemDefaults(): Set<String>
+
+    /**
+     * 保存系统默认白名单。
+     *
+     * 由 Hook 进程在提取 XML 白名单后调用；UI 进程通常只读。
+     * Hook 进程远端实现会抛出 [UnsupportedOperationException]。
+     */
+    fun saveSystemDefaults(pkgs: Set<String>)
+
+    /**
      * 注册配置变更监听器。底层基于 SharedPreferences 的
      * `OnSharedPreferenceChangeListener`，[listener] 会在配置真正发生变化后
      * 被回调，参数为变更后的最新 [SwipeGuardConfig]。
@@ -55,5 +71,13 @@ interface IConfigRepository {
          * UI 进程与 Hook 进程必须使用相同的 key，否则跨进程同步将失效。
          */
         const val KEY_CONFIG_JSON: String = "swipeguard_config_json"
+
+        /**
+         * SharedPreferences 中存储系统默认白名单 JSON 数组的 key。
+         *
+         * 由 [OplusConfigHooks]（Hook 进程）写入，
+         * UI 进程与 Hook 进程共享读取。
+         */
+        const val KEY_SYSTEM_DEFAULTS: String = "system_defaults"
     }
 }

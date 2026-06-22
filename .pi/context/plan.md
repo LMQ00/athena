@@ -268,8 +268,10 @@
 | 字段 | 内容 |
 |------|------|
 | 代理 | worker |
+| 状态 | ✅ DONE |
+| 实际结果 | CI #27976887217 success + MCP 在线 + verify-report.md 已输出 |
 | 依赖 | t6, t7, t8, t9 |
-| 涉及文件 | `.pi/context/verify-report.md`（新建） |
+| 涉及文件 | `.pi/context/verify-report.md`（已创建） |
 | 设计意图 | 闭环验证：所有改动已落 → CI 通过 → MCP 烟测确认未破坏现有 Hook 结构 → 输出最终状态 |
 | 执行要点 | 1) `git add -A && git commit -m 'optimize: t3-t9 逆向系统 Athena 后的 Hook 优化'` 触发 CI；2) 用 GitHub token 调 `GET /repos/LMQ00/athena/actions/runs?per_page=1` 轮询最新 run 直到 `conclusion=success`（**有 token 不限速**）；3) 失败则 `GET /repos/LMQ00/athena/actions/runs/{id}/logs` 拿 zip 日志（**有 token 可下载**），定位失败任务回滚；4) 成功则**重跑 t2 烟测**确认 MCP 端点仍正常（防止修改期间 MCP 挂了）；5) 输出 `verify-report.md`：`{"build": "success", "ci_run_id": N, "hook_files": [...], "system_service_hooks_removed": true, "reverse_report": "reverse-system-athena.md", "files_modified": [...]}` |
 | 风险 | CI 失败需要迭代修复 → 留出最多 3 轮迭代预算 |

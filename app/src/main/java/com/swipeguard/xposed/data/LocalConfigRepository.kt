@@ -33,10 +33,33 @@ class LocalConfigRepository(
         mutableMapOf()
     private val listenersLock = Any()
 
+    override fun loadSystemDefaults(): Set<String> {
+        val json = prefs.getString(IConfigRepository.KEY_SYSTEM_DEFAULTS, null) ?: return emptySet()
+        return try {
+            JsonCodec.decodeSet(json)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to decode system defaults", t)
+            emptySet()
+        }
+    }
+
+    override fun saveSystemDefaults(pkgs: Set<String>) {
+        prefs.edit().putString(IConfigRepository.KEY_SYSTEM_DEFAULTS, JsonCodec.encodeSet(pkgs)).apply()
+    }
+
     @Synchronized
     override fun load(): SwipeGuardConfig = try {
         val jsonStr = prefs.getString(IConfigRepository.KEY_CONFIG_JSON, null)
-        if (jsonStr.isNullOrEmpty()) SwipeGuardConfig.DEFAULT else JsonCodec.decode(jsonStr)
+        if (jsonStr.isNullOrEmpty()) SwipeGuardConfig.DEFAULT
+        else {
+            val config = JsonCodec.decode(jsonStr)
+            // schema v1 → v2 迁移：如果原始 JSON 含 protectedApps，
+            // 则立即写出 v2 格式，避免每次加载都做迁移
+            if (config.schemaVersion < 2 || jsonStr.contains("\"protectedApps\"")) {
+                save(config)
+            }
+            config
+        }
     } catch (t: Throwable) {
         // 解析失败：安全回退默认配置，同时备份损坏的 JSON 以便排查。
         val jsonStr = prefs.getString(IConfigRepository.KEY_CONFIG_JSON, null)

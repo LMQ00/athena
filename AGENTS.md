@@ -18,7 +18,7 @@
 | **语言** | Kotlin | JVM target 17 |
 | **Android SDK** | compileSdk / targetSdk | 37 |
 | **最低支持** | minSdk | 26 (Android 8.0) |
-| **Xposed 框架** | libxposed API (现代 API) | v100 |
+| **Xposed 框架** | libxposed API (现代 API) | 102.0.0 |
 | **依赖管理** | Version Catalog | `gradle/libs.versions.toml` |
 | **代码混淆** | ProGuard / R8 | 启用 (release) |
 | **UI 方案** | Jetpack Compose + Material 3 | Compose BOM 2024.10.01 |
@@ -94,11 +94,19 @@ ColorOS 16 Athena 系统服务
 @Serializable
 data class SwipeGuardConfig(
     var enabled: Boolean = true,             // 模块总开关
-    var protectedApps: Set<String> = emptySet(),  // 要保护的包名集合
+    var userAdditions: Set<String> = emptySet(),  // 用户额外添加的包名
+    var userRemovals: Set<String> = emptySet(),   // 用户从系统默认白名单中移除的包名
     var whitelistCategory: String = "100",   // whitePkg category 编码
-    val schemaVersion: Int = 1               // 向前兼容
+    val schemaVersion: Int = 2               // 向前兼容
 )
 ```
+
+双层白名单架构：
+- **系统默认白名单** (`systemDefaults`)：从 ColorOS `sys_elsa_config_list.xml` 中提取的 OEM 预设白名单，由 Hook 进程写入 `SharedPreferences` 的 `system_defaults` key
+- **用户修改**：`userAdditions` 添加 / `userRemovals` 移除
+- **有效白名单** = `(systemDefaults - userRemovals) + userAdditions`
+
+旧数据迁移：schema v1 的 `protectedApps` → v2 的 `userAdditions`，由 `SwipeGuardConfig.fromJson()` 自动转换，`LocalConfigRepository.load()` 自动持久化。
 
 `whitelistCategory` 写入 `<whitePkg category="..."/>` 三位独立编码：
 - `100` = forcewhite（系统级强制白名单，不可被覆盖）
@@ -196,6 +204,6 @@ UI 写入 SharedPreferences → 框架自动通过 Binder 回调通知 system_se
 - **进程分离**：UI 进程与 Hook 进程分离，配置通过 XposedService 跨进程共享
 - **ProGuard 规则**：`proguard-rules.pro` 已配置保留 `XposedModule` 子类入口
 - **线程安全**：`SwipeGuardConfig` 的读写热更新时整体替换引用；`OplusConfigHooks` 的 `streamStates` 使用 `WeakHashMap` + `synchronized` 块保护，合并为 `StreamState` 对象减少三次锁查询
-- **API 兼容**：libxposed API v100 与旧版 XposedBridge 不兼容，必须使用 LSPosed
+- **API 兼容**：libxposed API 102.0.0 与旧版 XposedBridge 不兼容，必须使用 LSPosed
 - **Hook 安装顺序**：`OplusConfigHooks` 先注入白名单 → `SwipeKillHooks` / `AthenaKillHooks` 再拦截 kill，形成「配置 → 拦截」闭环
 - **Athena 混淆兼容**：`SwipeKillHooks` 的路径 3 尝试多个混淆类名（`r3.c` / `r3.d`）以兼容不同 Athena 版本，找不到类时仅 WARN 降级

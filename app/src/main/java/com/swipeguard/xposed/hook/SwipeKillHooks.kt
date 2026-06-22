@@ -2,7 +2,6 @@ package com.swipeguard.xposed.hook
 
 import android.util.Log
 import com.swipeguard.xposed.data.RemoteConfigRepository
-import com.swipeguard.xposed.model.SwipeGuardConfig
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 
@@ -22,14 +21,20 @@ import io.github.libxposed.api.XposedModule
  *
  * 参数：pkg 直接是包名，无需反查 uid → 简单可靠。
  */
-class SwipeKillHooks(private val module: XposedModule) {
+class SwipeKillHooks(private val module: XposedModule,
+                      private val classLoader: ClassLoader) {
 
-    private var config: SwipeGuardConfig = SwipeGuardConfig.DEFAULT
+    @Volatile
+    private var effectiveSet: Set<String> = emptySet()
+    @Volatile
+    private var enabled: Boolean = true
     private val tag = "SwipeGuard/SwipeKill"
 
-    /** 从配置仓储同步配置 */
+    /** 从配置仓储同步配置，计算有效白名单 */
     fun syncConfig(repo: RemoteConfigRepository) {
-        config = repo.load()
+        val cfg = repo.load()
+        enabled = cfg.enabled
+        effectiveSet = (repo.loadSystemDefaults() - cfg.userRemovals) + cfg.userAdditions
     }
 
     /** 安装 Hook（三路径） */
@@ -45,7 +50,7 @@ class SwipeKillHooks(private val module: XposedModule) {
      */
     private fun hookKillBackgroundProcesses() {
         try {
-            val amsClass = Class.forName("com.android.server.am.ActivityManagerService")
+            val amsClass = Class.forName("com.android.server.am.ActivityManagerService", false, classLoader)
             val method = amsClass.declaredMethods.firstOrNull { m ->
                 m.name == "killBackgroundProcesses" &&
                 m.parameterCount >= 1 &&
@@ -78,7 +83,7 @@ class SwipeKillHooks(private val module: XposedModule) {
      */
     private fun hookForceStopPackage() {
         try {
-            val amsClass = Class.forName("com.android.server.am.ActivityManagerService")
+            val amsClass = Class.forName("com.android.server.am.ActivityManagerService", false, classLoader)
             val method = amsClass.declaredMethods.firstOrNull { m ->
                 m.name == "forceStopPackage" &&
                 m.parameterCount >= 1 &&
@@ -134,7 +139,7 @@ class SwipeKillHooks(private val module: XposedModule) {
             )
             val clz = classCandidates.firstNotNullOfOrNull { name ->
                 try {
-                    Class.forName(name)
+                    Class.forName(name, false, classLoader)
                 } catch (_: ClassNotFoundException) {
                     null
                 }
@@ -193,5 +198,5 @@ class SwipeKillHooks(private val module: XposedModule) {
 
     /** 判断包名是否受保护。 */
     private fun shouldProtect(pkg: String?): Boolean =
-        pkg != null && config.enabled && pkg in config.protectedApps
+        pkg != null && enabled && pkg in effectiveSet
 }

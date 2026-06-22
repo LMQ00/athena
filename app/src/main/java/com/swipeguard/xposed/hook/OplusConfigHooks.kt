@@ -1,7 +1,10 @@
 package com.swipeguard.xposed.hook
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
+import com.swipeguard.xposed.data.IConfigRepository
+import com.swipeguard.xposed.data.JsonCodec
 import com.swipeguard.xposed.model.SwipeGuardConfig
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
@@ -15,12 +18,13 @@ import java.io.FileInputStream
  * 关键干预路径有两条，均通过拦截「策略文件读取」实现：
  *
  *  1. **自启动白名单**：`OplusSettings.readConfig(Context, fileName, defaultResId)`
- *     读取 `startup/autostart_white_list.txt`。拦截后追加模块白名单包名，
+ *     读取 `startup/autostart_white_list.txt`。拦截后追加/移除模块白名单包名，
  *     使白名单内应用免于启动期冻结。
  *
  *  2. **冻结策略 XML**：系统通过 `FileInputStream` 读取
- *     `/data/oplus/os/bpm/sys_elsa_config_list.xml`。拦截后将原始 XML 经
- *     [XmlPolicyBuilder.buildEnhancedXml] 注入 whitePkg 覆盖后返回，
+ *     `/data/oplus/os/bpm/sys_elsa_config_list.xml`。拦截后提取系统默认白名单
+ *     写入 SharedPreferences，再将原始 XML 经
+ *     [XmlPolicyBuilder.buildEnhancedXml] 注入/移除 whitePkg 后返回，
  *     从而在不修改磁盘文件的前提下动态改写冻结策略。
  *
  * 容错：每个 Hook 点独立 try-catch；类/方法查找失败（非 ColorOS 或版本差异）
@@ -28,18 +32,41 @@ import java.io.FileInputStream
  *
  * 线程安全：[hijackedStreams] 用 [java.util.WeakHashMap] + 自身同步锁保护，
  * 与 [XmlPolicyBuilder]（无状态）配合，可被 system_server 多线程并发调用。
- * [config] 由调用方 ([ModuleMain]) 保证可见性（热更新时整体替换引用）。
+ * [currentConfig] / [currentEffectiveSet] 由调用方 ([ModuleMain]) 保证可见性。
  *
  * @param module    [ModuleMain] 实例，提供 `hook()` / `log()` 等 [XposedInterface] 能力
  * @param config    SwipeGuard 配置快照（线程安全由调用方保证，Hook 闭包按调用时机读取）
  * @param classLoader system_server ClassLoader，用于查找 OplusSettings
+ * @param prefs     远端 SharedPreferences，用于写入系统默认白名单
  */
 object OplusConfigHooks {
 
     private const val TAG = "SwipeGuard/OplusCfg"
 
-    /** 当前配置快照；通过 [updateConfig] 热更新，供所有 Hook 拦截闭包读取最新白名单。 */
+    /** 当前配置快照；通过 [updateConfig] 热更新，供所有 Hook 拦截闭包读取。 */
+    @Volatile
     private var currentConfig: SwipeGuardConfig = SwipeGuardConfig.DEFAULT
+
+    /**
+     * 当前有效白名单 = (systemDefaults - userRemovals) + userAdditions。
+     * 由 [updateConfig] 计算，供拦截闭包快速判断。
+     */
+    @Volatile
+    private var currentEffectiveSet: Set<String> = emptySet()
+
+    /**
+     * 系统默认白名单缓存 —— 最后一次写入 SharedPreferences 的值，
+     * 用于避免每次读取 XML 都重复写入。
+     */
+    @Volatile
+    private var lastWrittenSystemDefaults: Set<String>? = null
+
+    /**
+     * RemotePreferences 实例，由 [install] 传入。
+     * 仅用于写入/读取系统默认白名单。
+     */
+    @Volatile
+    private var remotePrefs: SharedPreferences? = null
 
     /** 自启动白名单文件名（相对路径，readConfig 第二参数）。 */
     private const val AUTOSTART_WHITELIST_FILE = "startup/autostart_white_list.txt"
@@ -76,27 +103,78 @@ object OplusConfigHooks {
      * 安装全部 ColorOS 策略读取 Hook。可被多次调用（重复 install 会注册多个
      * Hook，调用方需自行控制；当前仅 [ModuleMain.onSystemServerStarting] 调用一次）。
      *
-     * @param config  当前 SwipeGuard 配置快照；Hook 闭包捕获此引用，
-     *                热更新由 [ModuleMain] 整体替换 [config] 实现
-     * @param handles 安装成功的 Hook 句柄将追加到此列表，便于统一卸载 / hot-reload
+     * @param config   当前 SwipeGuard 配置快照；Hook 闭包捕获此引用，由 [ModuleMain] 热更新
+     * @param prefs    远端 SharedPreferences，用于写入/读取系统默认白名单
+     * @param handles  安装成功的 Hook 句柄将追加到此列表，便于统一卸载 / hot-reload
      */
     fun install(
         module: XposedModule,
         config: SwipeGuardConfig,
         classLoader: ClassLoader,
+        prefs: SharedPreferences,
         handles: MutableList<XposedInterface.HookHandle>,
     ) {
+        remotePrefs = prefs
+
+        // 初始化时从 prefs 加载已缓存的系统默认白名单
+        val defaults = loadSystemDefaultsFromPrefs()
         currentConfig = config
+        currentEffectiveSet = (defaults - config.userRemovals) + config.userAdditions
+        lastWrittenSystemDefaults = defaults
+
         installOplusSettingsReadConfig(module, config, classLoader, handles)
         installElsaConfigFileInputStream(module, config, handles)
     }
 
     /**
      * 热更新配置快照。由 [ModuleMain.syncHooks] 在配置热加载后调用，
-     * 替换 [currentConfig] 使后续 Hook 拦截使用最新白名单，无需重新 install。
+     * 替换 [currentConfig] 并重新计算有效白名单。
+     *
+     * @param config          最新 SwipeGuard 配置
+     * @param systemDefaults  最新系统默认白名单（从 SharedPreferences 读取）
      */
-    fun updateConfig(config: SwipeGuardConfig) {
+    fun updateConfig(config: SwipeGuardConfig, systemDefaults: Set<String>) {
         currentConfig = config
+        currentEffectiveSet = (systemDefaults - config.userRemovals) + config.userAdditions
+    }
+
+    // ------------------------------------------------------------------
+    // 系统默认白名单持久化
+    // ------------------------------------------------------------------
+
+    /** 从 SharedPreferences 读取系统默认白名单。 */
+    private fun loadSystemDefaultsFromPrefs(): Set<String> {
+        val prefs = remotePrefs ?: return emptySet()
+        val json = prefs.getString(IConfigRepository.KEY_SYSTEM_DEFAULTS, null) ?: return emptySet()
+        return try {
+            JsonCodec.decodeSet(json)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to decode system defaults", t)
+            emptySet()
+        }
+    }
+
+    /**
+     * 提取系统默认白名单并写入 SharedPreferences（仅在变化时写入）。
+     *
+     * 由 [hijackStream] 在每次读取原始 XML 后调用。
+     */
+    private fun writeSystemDefaultsIfChanged(newDefaults: Set<String>) {
+        if (newDefaults.isEmpty()) return
+        val last = lastWrittenSystemDefaults ?: emptySet()
+        if (newDefaults == last) return
+
+        val prefs = remotePrefs ?: return
+        prefs.edit()
+            .putString(IConfigRepository.KEY_SYSTEM_DEFAULTS, JsonCodec.encodeSet(newDefaults))
+            .apply()
+        lastWrittenSystemDefaults = newDefaults
+
+        // 重新计算有效白名单
+        val cfg = currentConfig
+        currentEffectiveSet = (newDefaults - cfg.userRemovals) + cfg.userAdditions
+
+        Log.i(TAG, "System defaults updated: ${last.size} → ${newDefaults.size} entries")
     }
 
     // ------------------------------------------------------------------
@@ -108,7 +186,7 @@ object OplusConfigHooks {
      *
      * 当 `fileName == "startup/autostart_white_list.txt"` 时，先放行原始调用拿到
      * 系统白名单内容（通常为 String），再用 [XmlPolicyBuilder.buildEnhancedAutoStartWhiteList]
-     * 追加模块白名单包名后替换返回值。
+     * 追加/移除模块白名单包名后替换返回值。
      *
      * ColorOS 不同版本该类可能位于 `android.provider.OplusSettings` 或
      * `com.oplus.settings.OplusSettings`，逐个尝试。
@@ -146,17 +224,18 @@ object OplusConfigHooks {
                 try {
                     val fileName = chain.getArg(1) as? String
                     if (fileName == AUTOSTART_WHITELIST_FILE && result is String) {
-                        if (!currentConfig.enabled || currentConfig.protectedApps.isEmpty()) {
-                            // 模块禁用或白名单为空时无需改写，避免无谓字符串拼接
+                        val cfg = currentConfig
+                        if (!cfg.enabled || currentEffectiveSet.isEmpty()) {
                             return@intercept result
                         }
                         val enhanced = XmlPolicyBuilder.buildEnhancedAutoStartWhiteList(
                             originalContent = result,
-                            config = currentConfig
+                            config = cfg
                         )
                         module.log(
                             Log.DEBUG, TAG,
-                            "readConfig($fileName) injected ${currentConfig.protectedApps.size} white pkgs."
+                            "readConfig($fileName) adjusted: " +
+                            "additions=${cfg.userAdditions.size} removals=${cfg.userRemovals.size}"
                         )
                         return@intercept enhanced
                     }
@@ -393,7 +472,7 @@ object OplusConfigHooks {
     }
 
     /**
-     * 读取原始 XML、构建增强字节并登记到 [hijackedStreams]。
+     * 读取原始 XML、提取系统默认白名单、构建增强字节并登记到 [hijackedStreams]。
      * 在构造 Hook 内同步执行；失败时放弃劫持（不影响系统正常读取原文件）。
      */
     private fun hijackStream(
@@ -405,13 +484,20 @@ object OplusConfigHooks {
         val originalBytes = fis.readBytes()
         val originalXml = String(originalBytes, Charsets.UTF_8)
 
-        // 模块禁用或白名单为空时无需改写，避免无谓 XML 拼接
-        if (!currentConfig.enabled || currentConfig.protectedApps.isEmpty()) {
+        // 提取系统默认白名单，仅在变化时写入 SharedPreferences
+        val systemDefaults = XmlPolicyBuilder.extractWhitePkgNames(originalXml)
+        writeSystemDefaultsIfChanged(systemDefaults)
+
+        val cfg = currentConfig
+        val effectiveSet = currentEffectiveSet
+
+        // 模块禁用或有效白名单为空时无需改写
+        if (!cfg.enabled || effectiveSet.isEmpty()) {
             module.log(Log.DEBUG, TAG, "Config empty/disabled, skip elsa hijack.")
             return
         }
 
-        val enhancedXml = XmlPolicyBuilder.buildEnhancedXml(originalXml, currentConfig)
+        val enhancedXml = XmlPolicyBuilder.buildEnhancedXml(originalXml, cfg)
         val enhancedBytes = enhancedXml.toByteArray(Charsets.UTF_8)
 
         synchronized(streamStates) {
@@ -419,7 +505,8 @@ object OplusConfigHooks {
         }
         module.log(
             Log.INFO, TAG,
-            "Elsa config hijacked: original=${originalBytes.size}B enhanced=${enhancedBytes.size}B protected=${currentConfig.protectedApps.size}"
+            "Elsa config hijacked: original=${originalBytes.size}B enhanced=${enhancedBytes.size}B " +
+            "systemDefaults=${systemDefaults.size} effective=${effectiveSet.size}"
         )
     }
 
@@ -494,7 +581,7 @@ object OplusConfigHooks {
     private fun serveReset(fis: FileInputStream): Boolean {
         synchronized(streamStates) {
             val state = streamStates[fis] ?: return false
-            if (state.mark < 0) return false // 未 mark 过则无法 reset
+            if (state.mark < 0) return true // 未 mark 过则保持 cursor 不变，对齐 BufferedInputStream 语义
             state.cursor = state.mark
             return true
         }

@@ -32,7 +32,7 @@ ColorOS 16 的 Athena 系统组件维护一个**应用白名单**。划卡时，
 APK: `app/build/outputs/apk/debug/app-debug.apk`
 
 ## 技术栈
-- libxposed API v100
+- libxposed API 102.0.0
 - Kotlin + Jetpack Compose + Material 3
 - kotlinx.serialization
 

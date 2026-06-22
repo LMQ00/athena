@@ -83,14 +83,16 @@ class ModuleMain : XposedModule() {
             config = configRepo.load()
 
             // 2. 订阅配置热更新：UI 进程改写 SharedPreferences 后，框架在 Binder
-            //    线程回调。仅当配置 JSON key 变更（或 key == null 表示全量回调）
-            //    时重新加载并同步给各 Hook。
+            //    线程回调。监听 config JSON 和 system_defaults 两个 key 的变更。
             prefs.registerOnSharedPreferenceChangeListener { _, key ->
-                if (key == IConfigRepository.KEY_CONFIG_JSON || key == null) {
+                if (key == IConfigRepository.KEY_CONFIG_JSON ||
+                    key == IConfigRepository.KEY_SYSTEM_DEFAULTS ||
+                    key == null
+                ) {
                     try {
                         config = configRepo.load()
                         syncHooks()
-                        log(Log.INFO, TAG, "Config hot-reloaded")
+                        log(Log.INFO, TAG, "Config hot-reloaded (key=$key)")
                     } catch (t: Throwable) {
                         // reload 失败不应影响已安装的 Hook；旧快照继续生效。
                         log(Log.ERROR, TAG, "Config reload failed", t)
@@ -104,30 +106,41 @@ class ModuleMain : XposedModule() {
             //    OplusConfig 先注入白名单 → SwipeKill 再拦截 kill → 形成配置→拦截闭环
             //    各 Hook 模块内部对类/方法查找失败均有容错，
             //    不会因 ColorOS 版本差异抛出。
-            tryInstall("OplusConfigHooks") {
-                OplusConfigHooks.install(this, config, classLoader, mutableListOf())
-            }
+            var installed = 0
+            var failed = 0
 
-            tryInstall("SwipeKillHooks") {
-                swipeKillHooks = SwipeKillHooks(this)
+            if (tryInstall("OplusConfigHooks") {
+                OplusConfigHooks.install(this, config, classLoader, prefs, mutableListOf())
+            }) installed++ else failed++
+
+            if (tryInstall("SwipeKillHooks") {
+                swipeKillHooks = SwipeKillHooks(this, classLoader)
                 swipeKillHooks.syncConfig(configRepo)
                 swipeKillHooks.install()
-            }
+            }) installed++ else failed++
 
             // Athena 自有 API 拦截（如找到 athenaKill 则优先于此路径保护）
-            tryInstall("AthenaKillHooks") {
-                athenaKillHooks = AthenaKillHooks(this)
+            if (tryInstall("AthenaKillHooks") {
+                athenaKillHooks = AthenaKillHooks(this, classLoader)
                 athenaKillHooks.syncConfig(configRepo)
                 athenaKillHooks.install()
-            }
+            }) installed++ else failed++
 
             // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
 
-            log(
-                Log.INFO, TAG,
-                "All hooks installed: OplusConfigHooks + SwipeKillHooks + AthenaKillHooks. " +
-                "Protected: ${config.protectedApps.size} apps"
-            )
+            if (failed == 0) {
+                log(
+                    Log.INFO, TAG,
+                    "All $installed hooks installed successfully. " +
+                    "Additions: ${config.userAdditions.size} Removals: ${config.userRemovals.size}"
+                )
+            } else {
+                log(
+                    Log.WARN, TAG,
+                    "$installed/${installed + failed} hooks installed, $failed failed. " +
+                    "Additions: ${config.userAdditions.size} Removals: ${config.userRemovals.size}"
+                )
+            }
         } catch (t: Throwable) {
             // 顶层兜底：任何未预期异常都仅记录，绝不让 system_server 崩溃。
             log(Log.ERROR, TAG, "Module init failed", t)
@@ -137,13 +150,13 @@ class ModuleMain : XposedModule() {
     /**
      * 配置热更新时同步各 Hook 的内部快照。
      *
-     * [OplusConfigHooks] 为 object，通过 [OplusConfigHooks.updateConfig] 热更新
-     * [currentConfig] 使拦截闭包读取最新白名单；[SwipeKillHooks] / [AthenaKillHooks]
-     * 通过 syncConfig(repo) 从 [RemoteConfigRepository] 重新加载。
+     * 从 [configRepo] 加载最新配置和系统默认白名单，计算有效白名单后
+     * 同步给 [OplusConfigHooks] / [SwipeKillHooks] / [AthenaKillHooks]。
      */
     private fun syncHooks() {
+        val systemDefaults = configRepo.loadSystemDefaults()
         // OplusConfigHooks 通过 updateConfig 热更新白名单，无需重新 install
-        OplusConfigHooks.updateConfig(config)
+        OplusConfigHooks.updateConfig(config, systemDefaults)
         if (::swipeKillHooks.isInitialized) swipeKillHooks.syncConfig(configRepo)
         if (::athenaKillHooks.isInitialized) athenaKillHooks.syncConfig(configRepo)
         // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
@@ -173,12 +186,16 @@ class ModuleMain : XposedModule() {
     /**
      * 统一 try-catch 安装辅助，捕获任何 [Throwable] 并以统一格式记录错误日志。
      * 内联函数避免 lambda 额外分配开销。
+     *
+     * @return true 安装成功，false 安装失败。
      */
-    private inline fun tryInstall(name: String, block: () -> Unit) {
-        try {
+    private inline fun tryInstall(name: String, block: () -> Unit): Boolean {
+        return try {
             block()
+            true
         } catch (t: Throwable) {
             log(Log.ERROR, TAG, "$name install failed", t)
+            false
         }
     }
 
