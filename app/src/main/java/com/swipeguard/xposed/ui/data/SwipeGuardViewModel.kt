@@ -24,7 +24,6 @@ object SwipeGuardViewModel : ViewModel() {
     data class UiState(
         val config: SwipeGuardConfig = SwipeGuardConfig.DEFAULT,
         val systemDefaults: Set<String> = emptySet(),
-        val isLoading: Boolean = true
     ) {
         /** 有效白名单 = 系统默认 - 用户移除 + 用户添加 */
         val effectiveProtectedApps: Set<String>
@@ -54,7 +53,6 @@ object SwipeGuardViewModel : ViewModel() {
             _state.value = UiState(
                 config = config,
                 systemDefaults = defaults,
-                isLoading = false
             )
         }
     }

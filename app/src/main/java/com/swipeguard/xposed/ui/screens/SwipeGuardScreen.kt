@@ -91,25 +91,35 @@ fun SwipeGuardScreen() {
 
             Spacer(Modifier.height(8.dp))
 
-            // 加载中 / 空状态
-            if (uiState.isLoading) {
+            // 等待 / 空 / 列表 状态
+            if (effectiveApps.isEmpty() && uiState.systemDefaults.isEmpty()) {
+                // system_server 的 Hook 尚未写入系统默认白名单
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant
                     )
                 ) {
-                    Row(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.height(12.dp))
                         Text(
                             "等待 system_server 初始化...",
                             style = MaterialTheme.typography.bodyMedium
                         )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "首次使用需重启后生效，或手动添加应用",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedButton(onClick = { SwipeGuardViewModel.load() }) {
+                            Text("刷新")
+                        }
                     }
                 }
             } else if (effectiveApps.isEmpty()) {
