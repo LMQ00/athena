@@ -1,0 +1,319 @@
+{
+  "testTimestamp": "2026-06-23",
+  "mcpEndpoint": "http://127.0.0.1:8787/mcp",
+  "overallStatus": "PASS",
+  "checks": {
+    "endpointReachable": true,
+    "initializeSuccess": true,
+    "toolsListSuccess": true,
+    "mtApkOpenSuccess": true,
+    "mtApkListZipSuccess": true,
+    "mtApkListDexSuccess": true,
+    "isSystemAthena": true,
+    "isNotProjectApk": true
+  },
+  "initialize": {
+    "request": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {}
+      }
+    },
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "protocolVersion": "2025-06-18",
+        "serverInfo": {
+          "name": "MT APK MCP",
+          "version": "0.1.0"
+        },
+        "capabilities": {
+          "tools": {
+            "availableTools": {
+              "mt_apk_open": { "available": true, "readOnly": true },
+              "mt_apk_list": { "available": true, "readOnly": true },
+              "mt_apk_outline_class": { "available": true, "readOnly": true },
+              "mt_apk_read_text": { "available": true, "readOnly": true },
+              "mt_apk_read_zip_bytes": { "available": true, "readOnly": true },
+              "mt_apk_read_resource_values": { "available": true, "readOnly": true },
+              "mt_apk_search": { "available": true, "readOnly": true },
+              "mt_apk_continue": { "available": true, "readOnly": true },
+              "mt_apk_modify": { "available": false, "readOnly": false },
+              "mt_apk_write": { "available": false, "readOnly": false }
+            }
+          }
+        }
+      }
+    }
+  },
+  "toolsListSummary": {
+    "request": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "tools/list",
+      "params": {}
+    },
+    "toolCount": 10,
+    "tools": [
+      {
+        "name": "mt_apk_open",
+        "title": "Open APK",
+        "readOnly": true,
+        "description": "Use first. Open a read-only APK workspace. Input: path (relative APK file path, mt://current-apk, or mt://workspace/<workspaceId>). Returns workspaceId, apkFileName, manifest/count/capability summaries, and inspect nextActions.",
+        "requiredParams": ["path"]
+      },
+      {
+        "name": "mt_apk_list",
+        "title": "List APK Entries",
+        "readOnly": true,
+        "description": "List APK entries (zip_entries, dex_classes, resource_table_entries, resource_table_types). Input: workspaceId, view, prefix, limit. Returns paginated items with locators.",
+        "requiredParams": ["workspaceId", "view", "prefix", "limit"]
+      },
+      {
+        "name": "mt_apk_outline_class",
+        "title": "Outline APK Class",
+        "readOnly": true,
+        "description": "List class fields and methods. Input: workspaceId, className, limit.",
+        "requiredParams": ["workspaceId", "className", "limit"]
+      },
+      {
+        "name": "mt_apk_read_text",
+        "title": "Read APK Text",
+        "readOnly": true,
+        "description": "Read decoded text from AXML, smali, or resource table XML locators. Input: workspaceId, locator (kind+target), limit, maxChars, includeLineNumbers, startLine, startColumn.",
+        "requiredParams": ["workspaceId", "locator", "limit", "maxChars", "includeLineNumbers", "startLine", "startColumn"]
+      },
+      {
+        "name": "mt_apk_read_zip_bytes",
+        "title": "Read APK ZIP Bytes",
+        "readOnly": true,
+        "description": "Read raw bytes from ZIP entries. Returns uppercase hex in data.byteWindow.hex. Input: workspaceId, locator (zip_entry), byteOffset, maxBytes.",
+        "requiredParams": ["workspaceId", "locator", "byteOffset", "maxBytes"]
+      },
+      {
+        "name": "mt_apk_read_resource_values",
+        "title": "Read APK Resource Values",
+        "readOnly": true,
+        "description": "Read resource table values. Input: workspaceId, locator (resource_table_entry), valueOffset, limit, perValueTextMaxChars.",
+        "requiredParams": ["workspaceId", "locator", "valueOffset", "limit", "perValueTextMaxChars"]
+      },
+      {
+        "name": "mt_apk_search",
+        "title": "Search APK",
+        "readOnly": true,
+        "description": "Search APK structures (overview, files, resources, dex_names, dex_strings, dex_string_members, smali). Input: workspaceId, target, query, queryType, caseSensitive, matchMode, prefix, includeMatchOffsets, limit, snippetMaxChars.",
+        "requiredParams": ["workspaceId", "target", "query", "queryType", "caseSensitive", "matchMode", "prefix", "includeMatchOffsets", "limit", "snippetMaxChars"]
+      },
+      {
+        "name": "mt_apk_continue",
+        "title": "Continue APK Cursor",
+        "readOnly": true,
+        "description": "Continue paginated results. Input: workspaceId, nextCursor, limit. Do not modify the opaque cursor.",
+        "requiredParams": ["workspaceId", "nextCursor", "limit"]
+      },
+      {
+        "name": "mt_apk_modify",
+        "title": "Modify APK Files",
+        "readOnly": false,
+        "available": false,
+        "description": "Modify smali or resource files. Currently disabled (readOnly=false, available=false)."
+      },
+      {
+        "name": "mt_apk_write",
+        "title": "Write APK",
+        "readOnly": false,
+        "available": false,
+        "description": "Write modified APK. Currently disabled (readOnly=false, available=false)."
+      }
+    ],
+    "fullSchemaSize": "91KB (truncated in stdout, full log at /data/data/com.termux/files/usr/tmp/pi-bash-a80464192aa9e77a.log)"
+  },
+  "mtApkOpen": {
+    "attempts": [
+      {
+        "id": 3,
+        "path": null,
+        "success": false,
+        "error": {
+          "code": "INVALID_ARGUMENT",
+          "message": "Missing path",
+          "severity": "fatal",
+          "recoverable": true,
+          "diagnostics": {
+            "operationDirectoryPath": null,
+            "availableApkFiles": [],
+            "availableApkFileCount": null,
+            "availableApkFilesTruncated": false
+          }
+        }
+      },
+      {
+        "id": 4,
+        "path": "/product/app/AIPlaymate/AIPlaymate.apk",
+        "success": false,
+        "error": {
+          "code": "INVALID_ARGUMENT",
+          "message": "path must be a relative file path",
+          "badValue": "/product/app/AIPlaymate/AIPlaymate.apk",
+          "example": "{\"path\":\"app.apk\"}"
+        }
+      }
+    ],
+    "success": {
+      "id": 5,
+      "path": "Athena_6.0.1.apk",
+      "response": {
+        "ok": true,
+        "data": {
+          "workspaceId": "25jitg9b",
+          "apkFileName": "Athena_6.0.1.apk",
+          "packageName": "com.oplus.athena",
+          "versionName": "6.0.1",
+          "versionCode": 601,
+          "minSdk": 35,
+          "targetSdk": 36,
+          "appLabel": "Athena",
+          "counts": {
+            "zipEntries": 1059,
+            "dexEntries": 1,
+            "xmlEntries": 855,
+            "classes": 5229
+          },
+          "capabilities": {
+            "canReadAxml": true,
+            "canSearchDexNames": true,
+            "canSearchDexStrings": true,
+            "canReadResourceTable": true
+          },
+          "resourceTableSummaryError": null
+        }
+      }
+    }
+  },
+  "mtApkList": {
+    "zipEntries": {
+      "id": 6,
+      "view": "zip_entries",
+      "prefix": "",
+      "limit": 50,
+      "response": {
+        "ok": true,
+        "totalAvailableCount": 1059,
+        "returnedCount": 50,
+        "hasMore": true,
+        "topLevelSample": [
+          "AndroidManifest.xml",
+          "assets/ (coui_*, sys_athena_*, sys_clear_*, sys_elsa_*, etc.)",
+          "atoms.proto",
+          "classes.dex (4.8MB)",
+          "com/oplus/app/athena/*.aidl (AIDL interfaces)",
+          "com/oplus/app/IAthenaService.aidl (main service)",
+          "com/oplus/app/IAthenaKillCallback.aidl",
+          "com/oplus/app/AthenaAppExitInfo.aidl"
+        ],
+        "keyFindings": [
+          "sys_athena_appfilter_list.xml (15.8KB) - app filtering config",
+          "sys_athena_config_list.xml (145.5KB) - main Athena config",
+          "sys_athena_dcs_config.xml (1.5KB) - DCS config",
+          "sys_athena_livelock_config_list.xml (5.6KB) - livelock detection",
+          "sys_athena_lock_app_config.xml (0.5KB) - lock app config",
+          "sys_athena_hybrid_swap_config.xml (1.6KB) - hybrid swap",
+          "sys_elsa_config_list.xml (85.5KB) - ELSA scheduler config",
+          "sys_guardelf_config_list.xml (6.3KB) - GuardElf config",
+          "Multiple AIDL interfaces: IAthenaService, IAthenaCallback, IAthenaKillCallback, etc."
+        ]
+      }
+    },
+    "dexClasses": {
+      "id": 7,
+      "view": "dex_classes",
+      "prefix": "",
+      "limit": 50,
+      "response": {
+        "ok": true,
+        "totalAvailableCount": 5229,
+        "returnedCount": 50,
+        "hasMore": true,
+        "sampleClasses": [
+          "a.a (2f, 4m)",
+          "a1.a (17f, 9m)",
+          "a1.d (11f, 16m)",
+          "a1.h (21f, 12m)",
+          "a1.n (15f, 10m)",
+          "a2.c (6f, 10m)",
+          "a2.d (12f, 14m)",
+          "a3.a (8f, 12m)",
+          "a3.g (1f, 30m)",
+          "a4.a0 (12f, 34m)"
+        ],
+        "note": "Classes are obfuscated (proguard). Total 5229 classes in single dex."
+      }
+    }
+  },
+  "verification": {
+    "isSystemAthena": true,
+    "packageName": "com.oplus.athena",
+    "packageNameContainsOplus": true,
+    "packageNameContainsAthena": true,
+    "appLabel": "Athena",
+    "isNotProjectSwipeGuard": true,
+    "apkLocation": "/storage/emulated/0/MT2/mcp/Athena_6.0.1.apk",
+    "apkVersion": "6.0.1 (versionCode 601)",
+    "androidTarget": "SDK 35-36 (Android 15-16)",
+    "isSystemApk": true,
+    "apkSource": "Oplus (OPPO/OnePlus/Realme) system AI assistant",
+    "athenaRole": "System resource management - ELSA scheduler, GuardElf, process freezing, memory optimization, app filtering, CPU limiting"
+  },
+  "callTemplates": {
+    "mtApkOpen": {
+      "method": "tools/call",
+      "params": {
+        "name": "mt_apk_open",
+        "arguments": {
+          "path": "Athena_6.0.1.apk"
+        }
+      },
+      "workspaceId": "25jitg9b"
+    },
+    "mtApkList": {
+      "zipEntries": {
+        "params": {
+          "name": "mt_apk_list",
+          "arguments": {
+            "workspaceId": "25jitg9b",
+            "view": "zip_entries",
+            "prefix": "",
+            "limit": 200
+          }
+        }
+      },
+      "dexClasses": {
+        "params": {
+          "name": "mt_apk_list",
+          "arguments": {
+            "workspaceId": "25jitg9b",
+            "view": "dex_classes",
+            "prefix": "",
+            "limit": 200
+          }
+        }
+      }
+    }
+  },
+  "mcpProtocolNotes": {
+    "requiredHeaders": {
+      "Content-Type": "application/json",
+      "Accept": "application/json, text/event-stream"
+    },
+    "protocolVersion": "2025-06-18",
+    "pathRequirement": "Relative path only. Absolute paths rejected with 'path must be a relative file path'.",
+    "operationDirectory": "/storage/emulated/0/MT2/mcp/ (inferred from successful path resolution)",
+    "paginationModel": "Each list/read/search returns nextActions[] with mt_apk_continue calls. nextCursor is opaque - do not parse or modify.",
+    "readOnlyTools": ["mt_apk_open", "mt_apk_list", "mt_apk_outline_class", "mt_apk_read_text", "mt_apk_read_zip_bytes", "mt_apk_read_resource_values", "mt_apk_search", "mt_apk_continue"],
+    "disabledTools": ["mt_apk_modify", "mt_apk_write"]
+  }
+}

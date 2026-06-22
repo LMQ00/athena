@@ -27,8 +27,8 @@ import io.github.libxposed.api.XposedModuleInterface.SystemServerStartingParam
  *     - [OplusConfigHooks]：ColorOS OFreezer 策略注入（autostart 白名单 + elsa XML）。
  *     - [SwipeKillHooks]：拦截 `ActivityManagerService.killBackgroundProcesses`，
  *       对白名单包名跳过 kill。
- *     - [SystemServiceHooks]：AOSP OomAdjuster 辅助保活，对白名单进程强制低
- *       oom_score_adj，缓解 LMK 杀进程。
+ *     - [AthenaKillHooks]：拦截系统自有 API 杀进程（athenaKill/clearProcess），
+ *       作为 SwipeKillHooks 的补充。
  *
  * 容错原则：所有初始化与 Hook 安装均 try-catch 包裹，**任何失败都不允许
  * 导致 system_server 崩溃**——失败时仅记录日志并降级为「无管控」模式。
@@ -53,8 +53,7 @@ class ModuleMain : XposedModule() {
     /** Athena 自有 API 杀进程拦截 Hook。 */
     private lateinit var athenaKillHooks: AthenaKillHooks
 
-    /** 系统服务辅助保活 Hook。 */
-    private lateinit var systemServiceHooks: SystemServiceHooks
+    // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
 
     /**
      * system_server 启动回调 —— 模块在 system_server 进程中只触发一次。
@@ -101,45 +100,33 @@ class ModuleMain : XposedModule() {
 
             val classLoader = param.classLoader
 
-            // 3. 安装 3 个独立 Hook。各 Hook 模块内部对类/方法查找失败均有容错,
+            // 3. 安装 3 个独立 Hook，顺序固定：
+            //    OplusConfig 先注入白名单 → SwipeKill 再拦截 kill → 形成配置→拦截闭环
+            //    各 Hook 模块内部对类/方法查找失败均有容错，
             //    不会因 ColorOS 版本差异抛出。
-            //    注意：OplusConfigHooks 为 object，install 捕获当前 config 快照,
-            //    热更新不重新 install（与任务规格一致）；SwipeKillHooks /
-            //    SystemServiceHooks 为实例，通过 syncConfig(repo) 刷新快照。
-            try {
+            tryInstall("OplusConfigHooks") {
                 OplusConfigHooks.install(this, config, classLoader, mutableListOf())
-            } catch (t: Throwable) {
-                log(Log.ERROR, TAG, "OplusConfigHooks.install failed.", t)
             }
 
-            try {
+            tryInstall("SwipeKillHooks") {
                 swipeKillHooks = SwipeKillHooks(this)
                 swipeKillHooks.syncConfig(configRepo)
                 swipeKillHooks.install()
-            } catch (t: Throwable) {
-                log(Log.ERROR, TAG, "SwipeKillHooks install failed.", t)
             }
 
             // Athena 自有 API 拦截（如找到 athenaKill 则优先于此路径保护）
-            try {
+            tryInstall("AthenaKillHooks") {
                 athenaKillHooks = AthenaKillHooks(this)
                 athenaKillHooks.syncConfig(configRepo)
                 athenaKillHooks.install()
-            } catch (t: Throwable) {
-                log(Log.ERROR, TAG, "AthenaKillHooks install failed.", t)
             }
 
-            try {
-                systemServiceHooks = SystemServiceHooks(this)
-                systemServiceHooks.syncConfig(configRepo)
-                systemServiceHooks.install()
-            } catch (t: Throwable) {
-                log(Log.ERROR, TAG, "SystemServiceHooks install failed.", t)
-            }
+            // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
 
             log(
                 Log.INFO, TAG,
-                "All hooks installed (SwipeKill + AthenaKill + OplusCfg + SystemService). Protected: ${config.protectedApps.size}"
+                "All hooks installed: OplusConfigHooks + SwipeKillHooks + AthenaKillHooks. " +
+                "Protected: ${config.protectedApps.size} apps"
             )
         } catch (t: Throwable) {
             // 顶层兜底：任何未预期异常都仅记录，绝不让 system_server 崩溃。
@@ -148,16 +135,18 @@ class ModuleMain : XposedModule() {
     }
 
     /**
-     * 配置热更新时同步各实例化 Hook 的内部快照。
+     * 配置热更新时同步各 Hook 的内部快照。
      *
-     * [OplusConfigHooks] 为 object 且 install 时捕获 config 快照，不在此处
-     * 刷新（与任务规格一致）；仅 [SwipeKillHooks] / [AthenaKillHooks] / [SystemServiceHooks]
-     * 通过 syncConfig(repo) 重新加载配置。
+     * [OplusConfigHooks] 为 object，通过 [OplusConfigHooks.updateConfig] 热更新
+     * [currentConfig] 使拦截闭包读取最新白名单；[SwipeKillHooks] / [AthenaKillHooks]
+     * 通过 syncConfig(repo) 从 [RemoteConfigRepository] 重新加载。
      */
     private fun syncHooks() {
+        // OplusConfigHooks 通过 updateConfig 热更新白名单，无需重新 install
+        OplusConfigHooks.updateConfig(config)
         if (::swipeKillHooks.isInitialized) swipeKillHooks.syncConfig(configRepo)
         if (::athenaKillHooks.isInitialized) athenaKillHooks.syncConfig(configRepo)
-        if (::systemServiceHooks.isInitialized) systemServiceHooks.syncConfig(configRepo)
+        // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
     }
 
     /**
@@ -179,6 +168,18 @@ class ModuleMain : XposedModule() {
     /** 应用 ClassLoader 就绪回调（system_server 中不触发）。 */
     override fun onPackageReady(param: PackageReadyParam) {
         // 预留扩展点。
+    }
+
+    /**
+     * 统一 try-catch 安装辅助，捕获任何 [Throwable] 并以统一格式记录错误日志。
+     * 内联函数避免 lambda 额外分配开销。
+     */
+    private inline fun tryInstall(name: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (t: Throwable) {
+            log(Log.ERROR, TAG, "$name install failed", t)
+        }
     }
 
     companion object {

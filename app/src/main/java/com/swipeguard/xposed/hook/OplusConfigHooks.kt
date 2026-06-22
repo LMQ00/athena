@@ -38,6 +38,9 @@ object OplusConfigHooks {
 
     private const val TAG = "SwipeGuard/OplusCfg"
 
+    /** 当前配置快照；通过 [updateConfig] 热更新，供所有 Hook 拦截闭包读取最新白名单。 */
+    private var currentConfig: SwipeGuardConfig = SwipeGuardConfig.DEFAULT
+
     /** 自启动白名单文件名（相对路径，readConfig 第二参数）。 */
     private const val AUTOSTART_WHITELIST_FILE = "startup/autostart_white_list.txt"
 
@@ -45,26 +48,28 @@ object OplusConfigHooks {
     private const val ELSA_CONFIG_PATH = "/data/oplus/os/bpm/sys_elsa_config_list.xml"
 
     /**
-     * 被「劫持」的 FileInputStream → 增强后字节缓冲。
+     * 单个 FileInputStream 的劫持状态。
      *
-     * 使用 [java.util.WeakHashMap] 避免泄漏已关闭的流对象。同步访问通过
-     * [hijackedStreams] 自身作为锁。
+     * 将原来的 [data, cursor, mark] 三个独立 WeakHashMap 合并为一个
+     * data class，减少三次 synchronized 查询的开销。
+     *
+     * @property data  增强后的字节缓冲（原始 XML + 注入 whitePkg）
+     * @property cursor 当前读取游标位置
+     * @property mark  mark() 保存的游标（-1 表示未 mark）
      */
-    private val hijackedStreams: java.util.WeakHashMap<FileInputStream, ByteArray> =
-        java.util.WeakHashMap()
+    private data class StreamState(
+        val data: ByteArray,
+        var cursor: Int = 0,
+        var mark: Int = -1,
+    )
 
     /**
-     * 每个 FileInputStream 当前的读取游标，用于分多次 `read()` 调用时正确切片。
-     * 与 [hijackedStreams] 同步管理。
+     * 被「劫持」的 FileInputStream → 状态对象。
+     *
+     * 使用 [java.util.WeakHashMap] 避免泄漏已关闭的流对象。
+     * 同步访问通过 [streamStates] 自身作为锁。
      */
-    private val streamCursor: java.util.WeakHashMap<FileInputStream, Int> =
-        java.util.WeakHashMap()
-
-    /**
-     * mark() 保存的游标位置，用于 mark/reset 支持。
-     * 与 [hijackedStreams] 同步管理。
-     */
-    private val streamMark: java.util.WeakHashMap<FileInputStream, Int> =
+    private val streamStates: java.util.WeakHashMap<FileInputStream, StreamState> =
         java.util.WeakHashMap()
 
     /**
@@ -81,8 +86,17 @@ object OplusConfigHooks {
         classLoader: ClassLoader,
         handles: MutableList<XposedInterface.HookHandle>,
     ) {
+        currentConfig = config
         installOplusSettingsReadConfig(module, config, classLoader, handles)
         installElsaConfigFileInputStream(module, config, handles)
+    }
+
+    /**
+     * 热更新配置快照。由 [ModuleMain.syncHooks] 在配置热加载后调用，
+     * 替换 [currentConfig] 使后续 Hook 拦截使用最新白名单，无需重新 install。
+     */
+    fun updateConfig(config: SwipeGuardConfig) {
+        currentConfig = config
     }
 
     // ------------------------------------------------------------------
@@ -132,17 +146,17 @@ object OplusConfigHooks {
                 try {
                     val fileName = chain.getArg(1) as? String
                     if (fileName == AUTOSTART_WHITELIST_FILE && result is String) {
-                        if (!config.enabled || config.protectedApps.isEmpty()) {
+                        if (!currentConfig.enabled || currentConfig.protectedApps.isEmpty()) {
                             // 模块禁用或白名单为空时无需改写，避免无谓字符串拼接
                             return@intercept result
                         }
                         val enhanced = XmlPolicyBuilder.buildEnhancedAutoStartWhiteList(
                             originalContent = result,
-                            config = config
+                            config = currentConfig
                         )
                         module.log(
                             Log.DEBUG, TAG,
-                            "readConfig($fileName) injected ${config.protectedApps.size} white pkgs."
+                            "readConfig($fileName) injected ${currentConfig.protectedApps.size} white pkgs."
                         )
                         return@intercept enhanced
                     }
@@ -230,7 +244,7 @@ object OplusConfigHooks {
                         }
                         // 直接精确匹配路径，避免 contains 子串误判
                         if (path != ELSA_CONFIG_PATH) return@intercept null
-                        hijackStream(module, config, fis)
+                        hijackStream(module, fis)
                     } catch (t: Throwable) {
                         module.log(Log.ERROR, TAG, "FileInputStream ctor hijack failed.", t)
                     }
@@ -363,10 +377,8 @@ object OplusConfigHooks {
                 .intercept { chain ->
                     val fis = chain.thisObject as? FileInputStream
                     if (fis != null) {
-                        synchronized(hijackedStreams) {
-                            hijackedStreams.remove(fis)
-                            streamCursor.remove(fis)
-                            streamMark.remove(fis)
+                        synchronized(streamStates) {
+                            streamStates.remove(fis)
                         }
                     }
                     chain.proceed()
@@ -386,7 +398,6 @@ object OplusConfigHooks {
      */
     private fun hijackStream(
         module: XposedModule,
-        config: SwipeGuardConfig,
         fis: FileInputStream,
     ) {
         // 读取原始内容；此处 read 调用会被本模块 read Hook 捕获，
@@ -395,21 +406,20 @@ object OplusConfigHooks {
         val originalXml = String(originalBytes, Charsets.UTF_8)
 
         // 模块禁用或白名单为空时无需改写，避免无谓 XML 拼接
-        if (!config.enabled || config.protectedApps.isEmpty()) {
+        if (!currentConfig.enabled || currentConfig.protectedApps.isEmpty()) {
             module.log(Log.DEBUG, TAG, "Config empty/disabled, skip elsa hijack.")
             return
         }
 
-        val enhancedXml = XmlPolicyBuilder.buildEnhancedXml(originalXml, config)
+        val enhancedXml = XmlPolicyBuilder.buildEnhancedXml(originalXml, currentConfig)
         val enhancedBytes = enhancedXml.toByteArray(Charsets.UTF_8)
 
-        synchronized(hijackedStreams) {
-            hijackedStreams[fis] = enhancedBytes
-            streamCursor[fis] = 0
+        synchronized(streamStates) {
+            streamStates[fis] = StreamState(data = enhancedBytes)
         }
         module.log(
             Log.INFO, TAG,
-            "Elsa config hijacked: original=${originalBytes.size}B enhanced=${enhancedBytes.size}B protected=${config.protectedApps.size}"
+            "Elsa config hijacked: original=${originalBytes.size}B enhanced=${enhancedBytes.size}B protected=${currentConfig.protectedApps.size}"
         )
     }
 
@@ -423,13 +433,14 @@ object OplusConfigHooks {
      *         `null` 表示该流未被劫持，调用方应透传 `proceed()`。
      */
     private fun serveHijacked(fis: FileInputStream, buf: ByteArray, off: Int, len: Int): Int? {
-        synchronized(hijackedStreams) {
-            val data = hijackedStreams[fis] ?: return null
-            val pos = streamCursor[fis] ?: 0
+        synchronized(streamStates) {
+            val state = streamStates[fis] ?: return null
+            val data = state.data
+            val pos = state.cursor
             if (pos >= data.size) return -1 // 增强缓冲已读完 → EOF
             val n = minOf(len, data.size - pos)
             System.arraycopy(data, pos, buf, off, n)
-            streamCursor[fis] = pos + n
+            state.cursor = pos + n
             return n
         }
     }
@@ -440,10 +451,10 @@ object OplusConfigHooks {
      * @return 可用字节数，`null` 表示该流未被劫持。
      */
     private fun serveAvailable(fis: FileInputStream): Int? {
-        synchronized(hijackedStreams) {
-            val data = hijackedStreams[fis] ?: return null
-            val pos = streamCursor[fis] ?: 0
-            return (data.size - pos).coerceAtLeast(0)
+        synchronized(streamStates) {
+            val state = streamStates[fis] ?: return null
+            val pos = state.cursor
+            return (state.data.size - pos).coerceAtLeast(0)
         }
     }
 
@@ -453,11 +464,11 @@ object OplusConfigHooks {
      * @return 实际跳过的字节数，`null` 表示该流未被劫持。
      */
     private fun serveSkip(fis: FileInputStream, n: Long): Long? {
-        synchronized(hijackedStreams) {
-            val data = hijackedStreams[fis] ?: return null
-            val pos = streamCursor[fis] ?: 0
-            val actualSkip = minOf(n.coerceAtLeast(0), (data.size - pos).toLong())
-            streamCursor[fis] = (pos + actualSkip.toInt())
+        synchronized(streamStates) {
+            val state = streamStates[fis] ?: return null
+            val pos = state.cursor
+            val actualSkip = minOf(n.coerceAtLeast(0), (state.data.size - pos).toLong())
+            state.cursor = (pos + actualSkip.toInt())
             return actualSkip
         }
     }
@@ -468,10 +479,9 @@ object OplusConfigHooks {
      * @return true 表示已处理（流被劫持），false 表示透传 proceed()。
      */
     private fun serveMark(fis: FileInputStream): Boolean {
-        synchronized(hijackedStreams) {
-            if (!hijackedStreams.containsKey(fis)) return false
-            val pos = streamCursor[fis] ?: 0
-            streamMark[fis] = pos
+        synchronized(streamStates) {
+            val state = streamStates[fis] ?: return false
+            state.mark = state.cursor
             return true
         }
     }
@@ -482,11 +492,10 @@ object OplusConfigHooks {
      * @return true 表示已处理（流被劫持），false 表示透传 proceed()。
      */
     private fun serveReset(fis: FileInputStream): Boolean {
-        synchronized(hijackedStreams) {
-            if (!hijackedStreams.containsKey(fis)) return false
-            val mark = streamMark[fis]
-            if (mark == null) return false // 未 mark 过则无法 reset
-            streamCursor[fis] = mark
+        synchronized(streamStates) {
+            val state = streamStates[fis] ?: return false
+            if (state.mark < 0) return false // 未 mark 过则无法 reset
+            state.cursor = state.mark
             return true
         }
     }
@@ -495,8 +504,8 @@ object OplusConfigHooks {
      * @return true 如果该流被劫持（支持 mark/reset），`null` 透传。
      */
     private fun serveMarkSupported(fis: FileInputStream): Boolean? {
-        synchronized(hijackedStreams) {
-            return if (hijackedStreams.containsKey(fis)) true else null
+        synchronized(streamStates) {
+            return if (streamStates.containsKey(fis)) true else null
         }
     }
 }

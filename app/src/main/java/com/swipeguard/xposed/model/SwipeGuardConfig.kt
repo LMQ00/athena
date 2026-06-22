@@ -17,6 +17,16 @@ data class SwipeGuardConfig(
     /** 需要加入 Athena 白名单的 app 包名集合 */
     var protectedApps: Set<String> = emptySet(),
 
+    /**
+     * 写入 <whitePkg category="..."/> 的 category 编码。
+     *
+     * 三位独立编码（每位表示一个维度）：
+     * - `100` = forcewhite（系统级强制白名单，不被杀）
+     * - `010` = oppo/oneplus 自有应用
+     * - `001` = 第三方应用
+     */
+    var whitelistCategory: String = "100",
+
     /** schema 版本，用于向前兼容 */
     val schemaVersion: Int = 1
 ) {

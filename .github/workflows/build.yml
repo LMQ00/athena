@@ -10,11 +10,24 @@ on:
     branches: [ "main" ]
   workflow_dispatch:  # 允许手动触发
 
+# 同分支取消旧 run，避免浪费 runner 时间
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+      - name: 审计 — workflow_dispatch 调用者
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "### ⚡ 手动触发审计" >> $GITHUB_STEP_SUMMARY
+          echo "- **调用者**: \`${{ github.actor }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **分支**: \`${{ github.ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+
       - name: Checkout 代码
         uses: actions/checkout@v4
 
@@ -23,6 +36,16 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+
+      - name: 缓存 Gradle 依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/*.gradle', '**/gradle-wrapper.properties', 'gradle.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
 
       - name: 设置 Android SDK
         uses: android-actions/setup-android@v3
@@ -40,9 +63,24 @@ jobs:
       - name: 构建 Debug APK
         run: ./gradlew assembleDebug
 
+      - name: 摘要 — APK 信息
+        run: |
+          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          if [ -n "$APK" ]; then
+            SIZE=$(ls -lh "$APK" | awk '{print $5}')
+            HASH=$(sha256sum "$APK" | awk '{print $1}')
+            echo "### 📦 Artifact" >> $GITHUB_STEP_SUMMARY
+            echo "- **路径**: \`$APK\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **大小**: $SIZE" >> $GITHUB_STEP_SUMMARY
+            echo "- **SHA256**: \`$HASH\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ⚠️ 未找到 APK 产物" >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: 上传 APK 产物
         uses: actions/upload-artifact@v4
         with:
           name: athena-debug
           path: app/build/outputs/apk/debug/
           if-no-files-found: error
+          retention-days: 7
