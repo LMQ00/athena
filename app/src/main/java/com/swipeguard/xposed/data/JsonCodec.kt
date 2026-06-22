@@ -1,8 +1,6 @@
 package com.swipeguard.xposed.data
 
 import com.swipeguard.xposed.model.SwipeGuardConfig
-import kotlinx.serialization.builtins.SetSerializer
-import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 
 object JsonCodec {
@@ -17,11 +15,11 @@ object JsonCodec {
 
     /** 编码 [Set]<[String]> 为 JSON 数组字符串 */
     fun encodeSet(set: Set<String>): String =
-        setJson.encodeToString(SetSerializer(serializer<String>()), set)
+        setJson.encodeToString(set)
 
     /** 从 JSON 数组字符串解码 [Set]<[String]>；解析失败返回空集合 */
     fun decodeSet(jsonStr: String): Set<String> =
         runCatching {
-            setJson.decodeFromString(SetSerializer(serializer<String>()), jsonStr)
+            setJson.decodeFromString(jsonStr)
         }.getOrDefault(emptySet())
 }
