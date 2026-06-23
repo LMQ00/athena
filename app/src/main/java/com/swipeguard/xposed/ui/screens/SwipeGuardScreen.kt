@@ -93,7 +93,7 @@ fun SwipeGuardScreen() {
 
             // 等待 / 空 / 列表 状态
             if (effectiveApps.isEmpty() && uiState.config.systemDefaults.isEmpty()) {
-                // system_server 的 Hook 尚未写入系统默认白名单
+                // 尚未获取到系统默认白名单（MCP 不可达或尚未刷新）
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
@@ -104,21 +104,13 @@ fun SwipeGuardScreen() {
                         modifier = Modifier.padding(24.dp).fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                        Spacer(Modifier.height(12.dp))
                         Text(
-                            "等待 system_server 初始化...",
+                            "点击刷新从系统获取默认白名单，或手动添加应用",
                             style = MaterialTheme.typography.bodyMedium
                         )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "首次使用需重启后生效，或手动添加应用",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                         Spacer(Modifier.height(12.dp))
-                        OutlinedButton(onClick = { SwipeGuardViewModel.load() }) {
-                            Text("刷新")
+                        OutlinedButton(onClick = { SwipeGuardViewModel.refreshSystemDefaults() }) {
+                            Text("从系统获取默认白名单")
                         }
                     }
                 }
@@ -130,7 +122,7 @@ fun SwipeGuardScreen() {
                     )
                 ) {
                     Text(
-                        "还没有受保护的应用\n点击右下角 + 添加",
+                        "已移除所有系统默认应用",
                         modifier = Modifier.padding(24.dp),
                         style = MaterialTheme.typography.bodyMedium
                     )

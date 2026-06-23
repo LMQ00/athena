@@ -107,7 +107,7 @@ class ModuleMain : XposedModule() {
             var failed = 0
 
             if (tryInstall("OplusConfigHooks") {
-                OplusConfigHooks.install(this, config, classLoader, prefs, mutableListOf())
+                OplusConfigHooks.install(this, config, classLoader, mutableListOf())
             }) installed++ else failed++
 
             if (tryInstall("SwipeKillHooks") {
