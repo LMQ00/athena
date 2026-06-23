@@ -53,8 +53,8 @@ data class SwipeGuardConfig(
         get() = (systemDefaults - userRemovals) + userAdditions
 
     companion object {
-        /** 空配置默认值 */
-        val DEFAULT = SwipeGuardConfig()
+        /** 空配置默认值（含预置系统白名单） */
+        val DEFAULT = SwipeGuardConfig(systemDefaults = KNOWN_SYSTEM_DEFAULTS)
 
         /**
          * ColorOS 16 Athena 系统级默认白名单。
