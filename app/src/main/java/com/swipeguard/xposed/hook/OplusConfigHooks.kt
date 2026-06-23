@@ -150,8 +150,14 @@ object OplusConfigHooks {
             }
 
             val prefs = remotePrefs ?: return
-            val currentJson = prefs.getString(IConfigRepository.KEY_CONFIG_JSON, null) ?: return
-            val parsedConfig = SwipeGuardConfig.fromJson(currentJson)
+            // 首次启动时 SharedPreferences 可能还不存在（UI 尚未写入）
+            // → 用 DEFAULT 创建初始配置，避免 ?: return 导致跳过写入
+            val currentJson = prefs.getString(IConfigRepository.KEY_CONFIG_JSON, null)
+            val parsedConfig = if (currentJson != null) {
+                SwipeGuardConfig.fromJson(currentJson)
+            } else {
+                SwipeGuardConfig.DEFAULT
+            }
             // 只有 systemDefaults 变化时才写入（避免无谓的 Binder 调用）
             if (parsedConfig.systemDefaults == defaults) return
 
