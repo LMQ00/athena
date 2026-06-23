@@ -53,9 +53,6 @@ data class SwipeGuardConfig(
         get() = (systemDefaults - userRemovals) + userAdditions
 
     companion object {
-        /** 空配置默认值（含预置系统白名单） */
-        val DEFAULT = SwipeGuardConfig(systemDefaults = KNOWN_SYSTEM_DEFAULTS)
-
         /**
          * ColorOS 16 Athena 系统级默认白名单。
          *
@@ -63,6 +60,68 @@ data class SwipeGuardConfig(
          * category=100=forcewhite（系统强制不杀）| 010=oplus自有 | 001=第三方
          */
         val KNOWN_SYSTEM_DEFAULTS: Set<String> = setOf(
+            // === category=100 (forcewhite: 系统强制不杀) ===
+            "com.coloros.soundrecorder",       // 录音机
+            "com.hiby.music",                  // 海贝音乐
+            "com.kugou.viper",                 // 酷狗蝰蛇音效
+            "com.kiloo.subwaysurf",            // 地铁跑酷
+            "com.oplus.cameradetection",        // 摄像头检测
+            "com.coloros.alarmclock",           // 闹钟
+            "com.google.android.apps.tycho",    // Google Tycho
+            "com.tmobile.pr.mytmobile",         // T-Mobile
+            "com.vzw.hss.myverizon",            // Verizon
+            "com.unionpay.tsmservice",          // 银联 TSMPay
+            "com.color.otaassistant",           // 系统 OTA 助手
+            "com.oplus.claw",                   // OPlus Claw
+
+            // === category=010 (OPlus 自有应用) ===
+            "com.coloros.screenrecorder",      // 屏幕录制
+            "com.oplus.melody",                // 铃声
+            "com.heytap.uwbconnect",            // UWB 连接
+            "com.oplus.onet",                  // OPlus Cloud
+            "com.oplus.screenrecorder",         // 屏幕录制
+            "com.coloros.oppopods",             // OPPO 耳机
+            "com.oplus.caseflash",              // 手机壳闪光
+            "com.edith.os",                    // Edith OS
+            "com.oplus.riderMode",              // 骑行模式
+            "com.realme.link",                 // Realme Link
+            "com.realme.linkcn",               // Realme Link CN
+            "com.oneplus.ctsprepare",           // 一加 CTS
+
+            // === category=001 (第三方) ===
+            "com.kuaidi.daijia.driver",         // 快嘀代驾司机
+            "com.sdu.didi.gsui",                // 滴滴出行
+            "com.ubercab.driver",               // Uber Driver
+            "cn.edaijia.android.driverclient",  // e代驾
+            "com.funcity.taxi.driver",          // 飞的
+            "com.newgame.padtool",              // 新手游
+            "com.sdu.didi.gui",                 // 滴滴车主
+            "com.sankuai.meituan.dispatch.homebrew",    // 美团配送
+            "com.sankuai.meituan.meituanwaimaibusiness", // 美团外卖商家
+            "me.ele.napos",                    // 饿了么商家
+            "com.samsung.android.app.watchmanager",     // Galaxy Watch
+            "com.cxyw.suyun.ui",               // 货拉拉
+            "com.google.android.marvin.talkback",       // TalkBack
+            "com.android.email",               // 邮件
+            "com.hp.android.printservice",      // HP 打印服务
+            "com.hp.printercontrol",            // HP 打印控制
+            "org.mopria.printplugin",           // Mopria 打印
+            "com.xunmeng.merchant",             // 拼多多商家
+            "com.lalamove.huolala.driver",      // 货拉拉司机
+            "com.sankuai.meituan.merchant",     // 美团商家
+            "com.google.android.talk",          // Google Talk
+            "com.sankuai.meituan.dispatch.crowdsource",  // 美团众包
+            "com.microsoft.windowsintune.companyportal", // Intune
+            "com.microsoft.teams",              // Microsoft Teams
+            "com.xiwei.logistics",              // 犀维物流
+            "me.ele.crowdsource",               // 蜂鸟众包
+            "cn.caocaokeji.dcdriver",           // 曹操司机
+            "com.huaxiaozhu.driver",            // 华夏出行
+            "com.wlqq",                        // 微粒贷
+        )
+
+        /** 空配置默认值（含预置系统白名单） */
+        val DEFAULT = SwipeGuardConfig(systemDefaults = KNOWN_SYSTEM_DEFAULTS)
             // === category=100 (forcewhite: 系统强制不杀) ===
             "com.coloros.soundrecorder",       // 录音机
             "com.hiby.music",                  // 海贝音乐
