@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.swipeguard.xposed.data.LocalConfigRepository
-import com.swipeguard.xposed.data.SwipeGuardMcpClient
 import com.swipeguard.xposed.model.SwipeGuardConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,8 +15,7 @@ import kotlinx.coroutines.launch
  * 单例 ViewModel，管理 SwipeGuard 配置状态。
  *
  * 有效白名单配置在 [SwipeGuardConfig] 中统一管理：
- * - [SwipeGuardConfig.systemDefaults]：从 ColorOS 原始 XML 提取的 OEM 预设白名单
- *   （UI 进程通过 MCP 从系统 Athena APK 读取）
+ * - [SwipeGuardConfig.systemDefaults]：预置的 ColorOS 系统默认白名单
  * - [SwipeGuardConfig.userAdditions] / [SwipeGuardConfig.userRemovals]：用户的增删操作
  * - [UiState.effectiveProtectedApps]：有效白名单 = (systemDefaults - userRemovals) + userAdditions
  */
@@ -47,28 +45,8 @@ object SwipeGuardViewModel : ViewModel() {
 
     fun load() {
         viewModelScope.launch(Dispatchers.IO) {
-            var config = repository.load()
-            // 如果 systemDefaults 为空，尝试从 MCP 读取
-            if (config.systemDefaults.isEmpty()) {
-                val defaults = SwipeGuardMcpClient.loadSystemDefaults()
-                if (defaults.isNotEmpty()) {
-                    config = config.copy(systemDefaults = defaults)
-                    repository.save(config)
-                }
-            }
+            val config = repository.load()
             _state.value = UiState(config = config)
-        }
-    }
-
-    /** 用户手动刷新系统默认白名单（从 MCP 读取） */
-    fun refreshSystemDefaults() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val defaults = SwipeGuardMcpClient.loadSystemDefaults()
-            if (defaults.isNotEmpty()) {
-                val config = _state.value.config.copy(systemDefaults = defaults)
-                repository.save(config)
-                _state.value = UiState(config = config)
-            }
         }
     }
 

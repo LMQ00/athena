@@ -91,30 +91,8 @@ fun SwipeGuardScreen() {
 
             Spacer(Modifier.height(8.dp))
 
-            // 等待 / 空 / 列表 状态
-            if (effectiveApps.isEmpty() && uiState.config.systemDefaults.isEmpty()) {
-                // 尚未获取到系统默认白名单（MCP 不可达或尚未刷新）
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp).fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            "点击刷新从系统获取默认白名单，或手动添加应用",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedButton(onClick = { SwipeGuardViewModel.refreshSystemDefaults() }) {
-                            Text("从系统获取默认白名单")
-                        }
-                    }
-                }
-            } else if (effectiveApps.isEmpty()) {
+            // 空 / 列表 状态
+            if (effectiveApps.isEmpty()) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
@@ -122,7 +100,7 @@ fun SwipeGuardScreen() {
                     )
                 ) {
                     Text(
-                        "已移除所有系统默认应用",
+                        "还没有受保护的应用\n点击右下角 + 添加",
                         modifier = Modifier.padding(24.dp),
                         style = MaterialTheme.typography.bodyMedium
                     )

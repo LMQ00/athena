@@ -6,8 +6,7 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
-    <!-- 用于 MCP 客户端连接本地 MT Manager 服务 -->
-    <uses-permission android:name="android.permission.INTERNET" />
+
 
     <application
         android:name=".SwipeGuardApplication"

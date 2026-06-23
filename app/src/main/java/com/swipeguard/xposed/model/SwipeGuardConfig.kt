@@ -11,8 +11,8 @@ import kotlinx.serialization.json.jsonObject
  * SwipeGuard 配置根容器。
  *
  * 双层白名单设计：
- * - **系统默认白名单**（[systemDefaults]）：从 ColorOS `sys_elsa_config_list.xml`
- *   中提取的 OEM 预设白名单，由 Hook 进程写入 SharedPreferences。
+ * - **系统默认白名单**（[systemDefaults]）：预置的 ColorOS 系统默认白名单应用，
+ *   基于对 `com.oplus.athena` v6.0.1 的逆向分析结果。
  * - **用户修改**：
  *   - [userAdditions]：用户额外添加的包名
  *   - [userRemovals]：用户从系统默认白名单中移除的包名
@@ -32,12 +32,7 @@ data class SwipeGuardConfig(
     /** 用户从系统默认白名单中移除的包名 */
     var userRemovals: Set<String> = emptySet(),
 
-    /**
-     * 系统默认白名单（从 ColorOS sys_elsa_config_list.xml 中提取的 OEM 预设包名）。
-     *
-     * 由 Hook 进程 ([OplusConfigHooks]) 在启动时主动读取 XML 提取并写入 config JSON，
-     * 随后通过跨进程 SharedPreferences 同步到 UI 进程。
-     */
+    /** 系统级默认白名单（逆向 Athena APK 提取 + 预置常用应用） */
     var systemDefaults: Set<String> = emptySet(),
 
     /**
@@ -53,13 +48,27 @@ data class SwipeGuardConfig(
     /** schema 版本，用于向前兼容 */
     val schemaVersion: Int = 2
 ) {
-    /** 计算有效白名单：系统默认 - 用户移除 + 用户添加 */
+    /** 有效白名单 = 系统默认 - 用户移除 + 用户添加 */
     val effectiveProtectedApps: Set<String>
         get() = (systemDefaults - userRemovals) + userAdditions
 
     companion object {
         /** 空配置默认值 */
         val DEFAULT = SwipeGuardConfig()
+
+        /** 预置的 ColorOS 系统默认白名单应用 */
+        val KNOWN_SYSTEM_DEFAULTS: Set<String> = setOf(
+            // 系统核心应用 (forcewhite 级别)
+            "com.coloros.soundrecorder",    // 录音机
+            "com.oplus.melody",             // 铃声
+
+            // 常见高频使用应用（用户期望不被打断）
+            "com.tencent.mm",               // 微信
+            "com.tencent.mobileqq",          // QQ
+            "com.eg.android.AlipayGphone",   // 支付宝
+            "com.tencent.wework",            // 企业微信
+            "com.alibaba.android.rimet",     // 钉钉
+        )
 
         private val json = Json {
             ignoreUnknownKeys = true
@@ -76,7 +85,10 @@ data class SwipeGuardConfig(
         fun fromJson(s: String): SwipeGuardConfig =
             runCatching {
                 val migrated = migrateFromV1(s)
-                json.decodeFromString(serializer(), migrated)
+                val cfg = json.decodeFromString(serializer(), migrated)
+                // 首次使用时 systemDefaults 为空，填充预置默认值
+                if (cfg.systemDefaults.isEmpty()) cfg.copy(systemDefaults = KNOWN_SYSTEM_DEFAULTS)
+                else cfg
             }.getOrDefault(DEFAULT)
 
         fun toJson(config: SwipeGuardConfig): String =
@@ -88,9 +100,7 @@ data class SwipeGuardConfig(
          * 并将 `schemaVersion` 设为 2。
          */
         private fun migrateFromV1(jsonStr: String): String {
-            // Fast path: no migration needed if protectedApps key is absent
             if (!jsonStr.contains("\"protectedApps\"")) return jsonStr
-
             return try {
                 val element = json.parseToJsonElement(jsonStr)
                 if (element !is JsonObject) return jsonStr
@@ -104,8 +114,6 @@ data class SwipeGuardConfig(
                     jsonStr
                 }
             } catch (_: Throwable) {
-                // Migration failed — proceed with original string;
-                // unknown keys will be ignored by the decoder.
                 jsonStr
             }
         }
