@@ -54,10 +54,10 @@ class ModuleMain : XposedModule() {
     /** Athena 自有 API 杀进程拦截 Hook。 */
     private lateinit var athenaKillHooks: AthenaKillHooks
 
-    /** Athena Binder 入口拦截 Hook（在 com.oplus.athena 进程中安装）。 */
+    /** Athena Binder 入口拦截 Hook（在 com.oplus.athena 进程中运行）。 */
     private var athenaBinderHooks: AthenaBinderHooks? = null
 
-    /** Athena 进程中配置热更新监听器，持有引用防止 GC。 */
+    /** Athena 进程配置热更新监听器引用（防止 GC）。 */
     private var athenaConfigListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
@@ -177,9 +177,20 @@ class ModuleMain : XposedModule() {
         )
     }
 
-    /** 应用包加载回调。
-     * 当目标包为 com.oplus.athena 时，安装 Binder 入口拦截 Hook。 */
+    /** 应用包加载回调。记录包加载事件；Hook 安装移至 [onPackageReady]。 */
     override fun onPackageLoaded(param: PackageLoadedParam) {
+        // 仅记录日志；实际安装延后到 onPackageReady（ClassLoader 就绪后）
+        if (param.packageName == "com.oplus.athena") {
+            log(Log.DEBUG, TAG, "onPackageLoaded: com.oplus.athena — deferring to onPackageReady")
+        }
+    }
+
+    /**
+     * 应用 ClassLoader 就绪回调。
+     * 当目标包为 com.oplus.athena 时，安装 Binder 入口拦截 Hook。
+     * [PackageReadyParam.classLoader] 在此阶段可用。
+     */
+    override fun onPackageReady(param: PackageReadyParam) {
         if (param.packageName == "com.oplus.athena") {
             try {
                 // 在 Athena 进程中获取配置（若尚未初始化）
@@ -187,8 +198,7 @@ class ModuleMain : XposedModule() {
                     val prefs = getRemotePreferences(PREFS_NAME)
                     configRepo = RemoteConfigRepository(prefs)
                 }
-                val classLoader = param.classLoader
-                athenaBinderHooks = AthenaBinderHooks(this, classLoader)
+                athenaBinderHooks = AthenaBinderHooks(this, param.classLoader)
                 athenaBinderHooks?.syncConfig(configRepo)
                 athenaBinderHooks?.install()
 
@@ -212,11 +222,6 @@ class ModuleMain : XposedModule() {
                 log(Log.ERROR, TAG, "AthenaBinderHooks install failed", t)
             }
         }
-    }
-
-    /** 应用 ClassLoader 就绪回调（system_server 中不触发）。 */
-    override fun onPackageReady(param: PackageReadyParam) {
-        // 预留扩展点。
     }
 
     /**
