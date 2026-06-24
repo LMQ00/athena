@@ -18,3 +18,4 @@ gradle-8.9-*.zip
 报错.log
 .gitignore
 *.log
+debug.keystore

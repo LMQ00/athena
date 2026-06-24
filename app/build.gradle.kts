@@ -5,6 +5,25 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+// 自动生成持久化 debug keystore（统一签名，避免每次重装卸载）
+val debugKeystore = rootProject.file("debug.keystore")
+if (!debugKeystore.exists()) {
+    val keytool = "${System.getProperty("java.home")}/bin/keytool"
+    project.exec {
+        commandLine(
+            keytool, "-genkey", "-v",
+            "-keystore", debugKeystore.absolutePath,
+            "-alias", "swipeguard",
+            "-keyalg", "RSA", "-keysize", "2048",
+            "-validity", "10000",
+            "-storepass", "android",
+            "-keypass", "android",
+            "-dname", "CN=SwipeGuard Debug, O=SwipeGuard, C=US"
+        )
+    }
+    logger.lifecycle("Created debug keystore at \${debugKeystore.absolutePath}")
+}
+
 android {
     namespace = "com.swipeguard.xposed"
     compileSdk = 37
@@ -13,11 +32,24 @@ android {
         applicationId = "com.swipeguard.xposed"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
+    }
+
+    signingConfigs {
+        create("persistent") {
+            val keystoreFile = rootProject.file("debug.keystore")
+            keyAlias = "swipeguard"
+            keyPassword = "android"
+            storePassword = "android"
+            storeFile = keystoreFile
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("persistent")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
