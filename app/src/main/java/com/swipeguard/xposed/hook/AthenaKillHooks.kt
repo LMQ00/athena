@@ -35,6 +35,7 @@ class AthenaKillHooks(private val module: XposedModule,
     fun install() {
         hookMethod("athenaKill")
         hookMethod("athenaKill2")
+        hookMethod("athenaKill3")   // 新版批量 kill（code 201）
         hookMethod("clearProcess")
     }
 

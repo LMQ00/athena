@@ -37,11 +37,12 @@ class SwipeKillHooks(private val module: XposedModule,
         effectiveSet = cfg.effectiveProtectedApps
     }
 
-    /** 安装 Hook（三路径） */
+    /** 安装 Hook（四路径） */
     fun install() {
         hookKillBackgroundProcesses()
         hookForceStopPackage()
         hookForceStopPackageAndSaveActivity()
+        hookOplusActivityManagerForceStop()
     }
 
     /**
@@ -193,6 +194,55 @@ class SwipeKillHooks(private val module: XposedModule,
                 Log.ERROR, tag,
                 "forceStopPackageAndSaveActivity hook failed: ${t.message}"
             )
+        }
+    }
+
+    /**
+     * 路径 4: android.app.OplusActivityManager.forceStopPackage
+     *
+     * ColorOS 16 划卡杀进程的真实路径（Athena 绕过 AOSP AMS，通过此方法执行）。
+     * 逆向报告显示完整调用链：
+     *   r3.c.forceStopPackageAndSaveActivity(pkg, userId)
+     *     → i3.h → OplusActivityManager.forceStopPackage(pkg, userId)
+     *       → x3.d.killProcess()
+     *
+     * OplusActivityManager 是 Android 框架类（android.app 包），
+     * 不会因 Athena APK 混淆变化而失效，是最可靠的拦截点。
+     */
+    private fun hookOplusActivityManagerForceStop() {
+        try {
+            val clazz = Class.forName("android.app.OplusActivityManager", false, classLoader)
+            val methods = clazz.declaredMethods.filter { m ->
+                m.name == "forceStopPackage" &&
+                m.parameterCount >= 1 &&
+                m.parameterTypes[0] == String::class.java
+            }
+            if (methods.isEmpty()) {
+                module.log(Log.WARN, tag, "OplusActivityManager.forceStopPackage not found, skip")
+                return
+            }
+            for (method in methods) {
+                module.hook(method)
+                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                    .intercept { chain ->
+                        val pkg = chain.getArg(0) as? String
+                        if (shouldProtect(pkg)) {
+                            module.log(
+                                Log.INFO, tag,
+                                "Blocked OplusActivityManager.forceStopPackage for $pkg"
+                            )
+                            return@intercept null
+                        }
+                        chain.proceed()
+                    }
+            }
+            module.log(
+                Log.INFO, tag,
+                "Hook installed: android.app.OplusActivityManager.forceStopPackage" +
+                " (${methods.size} overload(s))"
+            )
+        } catch (t: Throwable) {
+            module.log(Log.WARN, tag, "OplusActivityManager hook failed: ${t.message}")
         }
     }
 
