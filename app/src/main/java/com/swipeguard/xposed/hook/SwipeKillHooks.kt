@@ -37,12 +37,13 @@ class SwipeKillHooks(private val module: XposedModule,
         effectiveSet = cfg.effectiveProtectedApps
     }
 
-    /** 安装 Hook（四路径） */
+    /** 安装 Hook（五路径） */
     fun install() {
         hookKillBackgroundProcesses()
         hookForceStopPackage()
         hookForceStopPackageAndSaveActivity()
         hookOplusActivityManagerForceStop()
+        hookKillProcess()
     }
 
     /**
@@ -244,6 +245,90 @@ class SwipeKillHooks(private val module: XposedModule,
         } catch (t: Throwable) {
             module.log(Log.WARN, tag, "OplusActivityManager hook failed: ${t.message}")
         }
+    }
+
+    /**
+     * 路径 5: x3.d.killProcess — 最终杀进程执行点
+     *
+     * 逆向报告显示调用链：
+     *   r3.c.forceStopPackageAndSaveActivity(pkg, userId)
+     *     → i3.h → OplusActivityManager.forceStopPackage()
+     *     → x3.d.killProcess(clearInfo, pid, ...)  ← 所有 kill 路径的最终汇合点
+     *     → Process.killProcess()
+     *
+     * x3.d 是 ProGuard 混淆名，尝试多个候选以兼容不同 Athena 版本。
+     * 从 killProcess 的参数中提取包名（通常通过 clearInfo 字符串）。
+     */
+    private fun hookKillProcess() {
+        try {
+            val classCandidates = listOf(
+                "com.oplus.athena.x3.d",
+                "oplus.athena.x3.d",
+                "com.oplus.athena.x3.e",
+                "com.oplus.athena.x4.d",
+            )
+            val clz = classCandidates.firstNotNullOfOrNull { name ->
+                try {
+                    Class.forName(name, false, classLoader)
+                } catch (_: ClassNotFoundException) {
+                    null
+                }
+            }
+
+            if (clz == null) {
+                module.log(Log.WARN, tag, "x3.d class not found, skip killProcess hook")
+                return
+            }
+
+            val methods = clz.declaredMethods.filter { m ->
+                m.name == "killProcess" && m.parameterCount >= 1
+            }
+            if (methods.isEmpty()) {
+                module.log(Log.WARN, tag, "killProcess not found in ${clz.name}, skip")
+                return
+            }
+
+            for (method in methods) {
+                module.hook(method)
+                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                    .intercept { chain ->
+                        val pkg = extractPkgFromKillProcess(chain)
+                        if (shouldProtect(pkg)) {
+                            module.log(Log.INFO, tag, "Blocked killProcess for $pkg")
+                            return@intercept null
+                        }
+                        chain.proceed()
+                    }
+            }
+            module.log(
+                Log.INFO, tag,
+                "Hook installed: ${clz.name}.killProcess (${methods.size} overload(s))"
+            )
+        } catch (t: Throwable) {
+            module.log(Log.WARN, tag, "killProcess hook failed: ${t.message}")
+        }
+    }
+
+    /**
+     * 从 killProcess 的参数中提取包名。
+     * x3.d.killProcess 的典型签名：killProcess(String clearInfo, int pid, ...)
+     * clearInfo 格式通常为 "pkgName:reason" 或直接是包名。
+     */
+    private fun extractPkgFromKillProcess(chain: XposedInterface.Chain): String? {
+        try {
+            val types = chain.method.parameterTypes
+            for (i in types.indices) {
+                if (types[i] != String::class.java) continue
+                val arg = chain.getArg(i) as? String ?: continue
+                if (arg.isEmpty()) continue
+                // 尝试从 clearInfo 格式解析: "pkgName:reason"
+                val semicolonIdx = arg.indexOf(':')
+                val candidate = if (semicolonIdx > 0) arg.substring(0, semicolonIdx) else arg
+                if ("." in candidate && !candidate.startsWith("android.")) return candidate
+            }
+        } catch (_: Throwable) {
+        }
+        return null
     }
 
     /** 判断包名是否受保护。 */

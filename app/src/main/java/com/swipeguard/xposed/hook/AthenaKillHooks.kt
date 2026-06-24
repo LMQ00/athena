@@ -67,9 +67,12 @@ class AthenaKillHooks(private val module: XposedModule,
                     return
                 }
             } catch (_: ClassNotFoundException) {
-            } catch (_: Throwable) {
+                module.log(Log.WARN, tag, "Class $clsName not found for $methodName, trying next")
+            } catch (t: Throwable) {
+                module.log(Log.WARN, tag, "Failed to hook $clsName.$methodName: ${t.message}")
             }
         }
+        module.log(Log.WARN, tag, "ALL candidates failed for $methodName — no Athena kill interception")
     }
 
     private fun shouldBlock(method: Method,

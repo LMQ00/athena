@@ -66,7 +66,7 @@ object OplusConfigHooks {
      * @property mark  mark() 保存的游标（-1 表示未 mark）
      */
     private data class StreamState(
-        val data: ByteArray,
+        var data: ByteArray,
         var cursor: Int = 0,
         var mark: Int = -1,
     )
@@ -107,6 +107,25 @@ object OplusConfigHooks {
     fun updateConfig(config: SwipeGuardConfig) {
         currentConfig = config
         currentEffectiveSet = (config.systemDefaults - config.userRemovals) + config.userAdditions
+
+        // 刷新已劫持的 XML 缓冲，使热添加的包名即时生效
+        synchronized(streamStates) {
+            val iterator = streamStates.entries.iterator()
+            while (iterator.hasNext()) {
+                val (fis, state) = iterator.next()
+                try {
+                    val originalXml = String(state.data, Charsets.UTF_8)
+                    val enhancedXml = XmlPolicyBuilder.buildEnhancedXml(originalXml, config)
+                    val enhancedBytes = enhancedXml.toByteArray(Charsets.UTF_8)
+                    // 重置游标，允许重新读取
+                    state.data = enhancedBytes
+                    state.cursor = 0
+                    state.mark = -1
+                } catch (t: Throwable) {
+                    iterator.remove() // 刷新失败则移除劫持，回退到原始内容
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------------------
