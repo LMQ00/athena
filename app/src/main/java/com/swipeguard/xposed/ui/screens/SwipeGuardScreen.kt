@@ -19,7 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.drawablePainter
+import androidx.compose.ui.res.rememberDrawablePainter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -272,7 +272,7 @@ private fun AppIcon(pkg: String, size: Int) {
     }
     if (drawable != null) {
         Image(
-            painter = drawablePainter(drawable),
+            painter = rememberDrawablePainter(drawable),
             contentDescription = null,
             modifier = Modifier
                 .size(size.dp)
