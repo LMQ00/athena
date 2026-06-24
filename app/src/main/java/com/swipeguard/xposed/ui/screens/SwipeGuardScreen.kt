@@ -262,7 +262,14 @@ private fun AppIcon(pkg: String, size: Int) {
     val context = LocalContext.current
     val drawable = remember(pkg) {
         try {
-            context.packageManager.getApplicationIcon(pkg)
+            // 用目标应用的上下文加载图标，确保主题属性正确解析
+            val targetContext = context.createPackageContext(pkg, 0)
+            val appInfo = targetContext.packageManager.getApplicationInfo(pkg, 0)
+            if (appInfo.icon != 0) {
+                targetContext.getDrawable(appInfo.icon)
+            } else {
+                context.packageManager.getApplicationIcon(pkg)
+            }
         } catch (_: Exception) {
             null
         }
@@ -273,6 +280,8 @@ private fun AppIcon(pkg: String, size: Int) {
                 android.widget.ImageView(ctx).apply {
                     setImageDrawable(drawable)
                     scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                    // 确保不应用任何来自父级的 tint
+                    imageTintList = null
                 }
             },
             modifier = Modifier
