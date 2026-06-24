@@ -265,11 +265,9 @@ private fun AppIcon(pkg: String, size: Int) {
     val painter = remember(pkg) {
         try {
             val drawable = context.packageManager.getApplicationIcon(pkg)
-            val size = (context.resources.displayMetrics.density * 72).toInt()
-            val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-            val canvas = android.graphics.Canvas(bitmap)
-            drawable.setBounds(0, 0, size, size)
-            drawable.draw(canvas)
+            val px = (context.resources.displayMetrics.density * 48).toInt()
+            // toBitmap() 正确支持 AdaptiveIconDrawable/VectorDrawable 等复杂类型
+            val bitmap = drawable.toBitmap(px, px, Bitmap.Config.ARGB_8888)
             BitmapPainter(bitmap.asImageBitmap())
         } catch (_: Exception) {
             null
