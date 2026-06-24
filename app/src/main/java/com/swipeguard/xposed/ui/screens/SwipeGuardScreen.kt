@@ -2,7 +2,7 @@ package com.swipeguard.xposed.ui.screens
 
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
-import androidx.compose.animation.animateColorAsState
+import android.graphics.Bitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,7 +16,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -27,11 +28,11 @@ import com.swipeguard.xposed.ui.data.SwipeGuardViewModel
 import kotlinx.coroutines.launch
 
 /**
- * SwipeGuard 主界面。
+ * SwipeGuard 主界面 —— 单屏。
  *
- * 顶部：全局开关
- * 中部：已保护 app 列表（系统默认/用户添加，带标签）
- * 底部 FAB：添加新 app
+ * 顶栏：应用名 + Switch 开关
+ * 主内容：已保护应用列表（图标 + 名 + 包名 + 标签）
+ * FAB：添加新应用
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,6 +43,8 @@ fun SwipeGuardScreen() {
     var showAddDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf<String?>(null) }
 
+    val effectiveApps = uiState.effectiveProtectedApps
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -49,12 +52,18 @@ fun SwipeGuardScreen() {
                     Column {
                         Text("SwipeGuard", style = MaterialTheme.typography.titleLarge)
                         Text(
-                            if (uiState.config.enabled) "保护已开启" else "保护已关闭",
+                            "已保护 ${effectiveApps.size} 个应用",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (uiState.config.enabled) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                },
+                actions = {
+                    Switch(
+                        checked = uiState.config.enabled,
+                        onCheckedChange = { SwipeGuardViewModel.toggleEnabled() }
+                    )
+                    Spacer(Modifier.width(8.dp))
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
@@ -67,77 +76,14 @@ fun SwipeGuardScreen() {
             }
         }
     ) { padding ->
-        val effectiveApps = uiState.effectiveProtectedApps
-
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // 全局开关卡片
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (uiState.config.enabled)
-                        MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            "白名单保护",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            if (uiState.config.enabled) "已保护 ${effectiveApps.size} 个应用" else "点击开关启用保护",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = uiState.config.enabled,
-                        onCheckedChange = { SwipeGuardViewModel.toggleEnabled() }
-                    )
-                }
-            }
-
-            // 列表标题
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "已保护应用",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    "${effectiveApps.size} 个",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            // 列表 / 空状态
             if (effectiveApps.isEmpty()) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
+                    modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -156,20 +102,19 @@ fun SwipeGuardScreen() {
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(bottom = 80.dp) // 避免 FAB 遮挡
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 16.dp, end = 16.dp,
+                        top = 8.dp, bottom = 88.dp // 避免 FAB 遮挡
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     items(effectiveApps.sorted(), key = { it }) { pkg ->
                         val isSystemDefault = pkg in uiState.config.systemDefaults
                         val isUserAdded = pkg in uiState.config.userAdditions
-                        val appLabel = getAppLabel(context, pkg)
 
                         AppItemCard(
                             pkg = pkg,
-                            appLabel = appLabel,
                             isSystemDefault = isSystemDefault,
                             isUserAdded = isUserAdded,
                             onClick = { showDeleteConfirm = pkg }
@@ -180,10 +125,10 @@ fun SwipeGuardScreen() {
         }
     }
 
-    // 添加应用对话框
+    // 添加对话框
     if (showAddDialog) {
         AddAppDialog(
-            currentPackages = uiState.effectiveProtectedApps,
+            currentPackages = effectiveApps,
             onAdd = { pkg ->
                 scope.launch { SwipeGuardViewModel.addPackage(pkg) }
                 showAddDialog = false
@@ -226,7 +171,6 @@ fun SwipeGuardScreen() {
 @Composable
 private fun AppItemCard(
     pkg: String,
-    appLabel: String,
     isSystemDefault: Boolean,
     isUserAdded: Boolean,
     onClick: () -> Unit
@@ -246,23 +190,26 @@ private fun AppItemCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // 应用图标
+            AppIcon(pkg = pkg, size = 40)
+
+            Spacer(Modifier.width(12.dp))
+
+            // 名称 + 包名
             Column(modifier = Modifier.weight(1f)) {
-                // 应用名
                 Text(
-                    text = appLabel,
+                    text = getAppLabel(LocalContext.current, pkg),
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                // 包名（小字）
                 Text(
                     text = pkg,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -270,7 +217,7 @@ private fun AppItemCard(
 
             Spacer(Modifier.width(8.dp))
 
-            // 标签
+            // 标签 + 移除
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (isUserAdded) {
                     Surface(
@@ -298,7 +245,6 @@ private fun AppItemCard(
                         )
                     }
                 }
-                // 移除按钮
                 Text(
                     "移除",
                     style = MaterialTheme.typography.labelMedium,
@@ -306,6 +252,40 @@ private fun AppItemCard(
                 )
             }
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 应用图标组件
+// ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun AppIcon(pkg: String, size: Int) {
+    val context = LocalContext.current
+    val painter = remember(pkg) {
+        try {
+            val drawable = context.packageManager.getApplicationIcon(pkg)
+            val bitmap = Bitmap.createBitmap(
+                (drawable.intrinsicWidth * 1.5f).toInt().coerceAtLeast(1),
+                (drawable.intrinsicHeight * 1.5f).toInt().coerceAtLeast(1),
+                Bitmap.Config.ARGB_8888
+            )
+            val canvas = android.graphics.Canvas(bitmap)
+            drawable.setBounds(0, 0, canvas.width, canvas.height)
+            drawable.draw(canvas)
+            BitmapPainter(bitmap.asImageBitmap())
+        } catch (_: Exception) {
+            null
+        }
+    }
+    if (painter != null) {
+        Icon(
+            painter = painter,
+            contentDescription = null,
+            modifier = Modifier
+                .size(size.dp)
+                .clip(RoundedCornerShape(8.dp))
+        )
     }
 }
 
@@ -324,7 +304,6 @@ private fun AddAppDialog(
     var showSystemApps by remember { mutableStateOf(false) }
     var selectedPkg by remember { mutableStateOf<String?>(null) }
 
-    // 已安装应用列表
     val installedApps = remember(showSystemApps, currentPackages) {
         context.packageManager.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0))
             .filter {
@@ -335,7 +314,6 @@ private fun AddAppDialog(
             .sortedBy { getAppLabel(context, it.packageName).lowercase() }
     }
 
-    // 搜索过滤
     val filteredApps = remember(searchQuery, installedApps) {
         if (searchQuery.isBlank()) installedApps
         else installedApps.filter { app ->
@@ -427,19 +405,11 @@ private fun AddAppDialog(
                         )
                     }
                 } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
+                    LazyColumn(modifier = Modifier.fillMaxWidth()) {
                         items(filteredApps, key = { it.packageName }) { app ->
                             val pkg = app.packageName
                             val label = getAppLabel(context, pkg)
                             val isSelected = pkg == selectedPkg
-                            val bgColor by animateColorAsState(
-                                if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                else Color.Transparent,
-                                label = "bg"
-                            )
 
                             Surface(
                                 modifier = Modifier
@@ -447,18 +417,25 @@ private fun AddAppDialog(
                                     .clip(RoundedCornerShape(10.dp))
                                     .clickable { selectedPkg = pkg },
                                 shape = RoundedCornerShape(10.dp),
-                                color = bgColor
+                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                        else MaterialTheme.colorScheme.surface
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    // 图标
+                                    AppIcon(pkg = pkg, size = 32)
+
+                                    Spacer(Modifier.width(12.dp))
+
+                                    // 名称 + 包名
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = label,
-                                            style = MaterialTheme.typography.bodyLarge,
+                                            style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.Medium,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -466,12 +443,15 @@ private fun AddAppDialog(
                                         Text(
                                             text = pkg,
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     }
+
+                                    // 选中标记
                                     if (isSelected) {
+                                        Spacer(Modifier.width(8.dp))
                                         Icon(
                                             Icons.Filled.Check,
                                             contentDescription = null,
@@ -488,13 +468,9 @@ private fun AddAppDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = {
-                    selectedPkg?.let { onAdd(it) }
-                },
+                onClick = { selectedPkg?.let { onAdd(it) } },
                 enabled = selectedPkg != null
-            ) {
-                Text("确认添加")
-            }
+            ) { Text("确认添加") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
@@ -506,15 +482,20 @@ private fun AddAppDialog(
 // 工具函数
 // ─────────────────────────────────────────────────────────────────
 
-/**
- * 根据包名获取应用友好名称。如果无法获取则回退到包名。
- */
+private val appLabelCache = mutableMapOf<String, String>()
+
 private fun getAppLabel(context: android.content.Context, pkg: String): String {
-    return try {
+    appLabelCache[pkg]?.let { return it }
+    val label = try {
         val pm = context.packageManager
-        val appInfo = pm.getApplicationInfo(pkg, PackageManager.ApplicationInfoFlags.of(0))
+        val appInfo = pm.getApplicationInfo(
+            pkg,
+            PackageManager.ApplicationInfoFlags.of(0)
+        )
         pm.getApplicationLabel(appInfo).toString()
     } catch (_: Exception) {
         pkg
     }
+    appLabelCache[pkg] = label
+    return label
 }
