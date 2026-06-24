@@ -313,17 +313,17 @@ class SwipeKillHooks(private val module: XposedModule,
      * 从 killProcess 的参数中提取包名。
      * x3.d.killProcess 的典型签名：killProcess(String clearInfo, int pid, ...)
      * clearInfo 格式通常为 "pkgName:reason" 或直接是包名。
+     * 遍历所有 String 参数，用 "含点且非 android. 开头" 启发式识别包名。
      */
     private fun extractPkgFromKillProcess(chain: XposedInterface.Chain): String? {
         try {
-            val types = chain.method.parameterTypes
-            for (i in types.indices) {
-                if (types[i] != String::class.java) continue
-                val arg = chain.getArg(i) as? String ?: continue
-                if (arg.isEmpty()) continue
+            val args = chain.getArgs() ?: return null
+            for (arg in args) {
+                val s = arg as? String ?: continue
+                if (s.isEmpty()) continue
                 // 尝试从 clearInfo 格式解析: "pkgName:reason"
-                val semicolonIdx = arg.indexOf(':')
-                val candidate = if (semicolonIdx > 0) arg.substring(0, semicolonIdx) else arg
+                val semicolonIdx = s.indexOf(':')
+                val candidate = if (semicolonIdx > 0) s.substring(0, semicolonIdx) else s
                 if ("." in candidate && !candidate.startsWith("android.")) return candidate
             }
         } catch (_: Throwable) {
