@@ -19,3 +19,4 @@ gradle-8.9-*.zip
 .gitignore
 *.log
 debug.keystore
+*.md
