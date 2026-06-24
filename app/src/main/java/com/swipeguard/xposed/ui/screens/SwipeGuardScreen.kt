@@ -2,7 +2,6 @@ package com.swipeguard.xposed.ui.screens
 
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,9 +15,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.drawablePainter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -262,28 +261,16 @@ private fun AppItemCard(
 @Composable
 private fun AppIcon(pkg: String, size: Int) {
     val context = LocalContext.current
-    val painter = remember(pkg) {
+    val drawable = remember(pkg) {
         try {
-            val drawable = context.packageManager.getApplicationIcon(pkg).mutate()
-            drawable.clearColorFilter()
-            val px = (context.resources.displayMetrics.density * 48).toInt()
-            val bitmap = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
-            bitmap.density = context.resources.displayMetrics.densityDpi
-            val canvas = android.graphics.Canvas(bitmap)
-            // 先画背景（透明或浅灰）以防某些图标只有前景层
-            val bg = android.graphics.drawable.ColorDrawable(android.graphics.Color.argb(0, 0, 0, 0))
-            bg.setBounds(0, 0, px, px)
-            bg.draw(canvas)
-            drawable.setBounds(0, 0, px, px)
-            drawable.draw(canvas)
-            BitmapPainter(bitmap.asImageBitmap())
+            context.packageManager.getApplicationIcon(pkg)
         } catch (_: Exception) {
             null
         }
     }
-    if (painter != null) {
+    if (drawable != null) {
         Icon(
-            painter = painter,
+            painter = drawablePainter(drawable),
             contentDescription = null,
             modifier = Modifier
                 .size(size.dp)
