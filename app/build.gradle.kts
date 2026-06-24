@@ -9,6 +9,23 @@ android {
     namespace = "com.swipeguard.xposed"
     compileSdk = 37
 
+    signingConfigs {
+        getByName("debug") {
+            keyAlias = "androiddebugkey"
+            keyPassword = project.findProperty("KEYSTORE_DEBUG_PASSWORD")?.toString() ?: "android"
+            storeFile = file(rootProject.projectDir.resolve("config/signing/debug.keystore"))
+            storePassword = project.findProperty("KEYSTORE_DEBUG_PASSWORD")?.toString() ?: "android"
+        }
+        // Release 签名通过环境变量注入（GitHub Secrets），本地构建时会回退到 debug keystore
+        create("release") {
+            keyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: "androiddebugkey"
+            keyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: "android"
+            storeFile = file(System.getenv("RELEASE_STORE_FILE")
+                ?: rootProject.projectDir.resolve("config/signing/debug.keystore").toString())
+            storePassword = System.getenv("RELEASE_STORE_PASSWORD") ?: "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.swipeguard.xposed"
         minSdk = 26
@@ -19,10 +36,10 @@ android {
 
     buildTypes {
         debug {
-            // 使用 AGP 默认 debug.keystore（~/.android/debug.keystore），
-            // AGP 创建时用固定参数，所有环境签名一致
+            signingConfig = signingConfigs.getByName("debug")
         }
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

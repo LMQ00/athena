@@ -135,6 +135,7 @@ class SwipeKillHooks(private val module: XposedModule,
             // 尝试多个混淆类名（兼容不同 Athena 版本/混淆配置）
             // 逆向报告: r3.c 是 OplusActivityManager 封装类
             val classCandidates = listOf(
+                "r3.c",
                 "com.oplus.athena.r3.c",
                 "com.oplus.athena.r3.d",
                 "oplus.athena.r3.c"
@@ -262,6 +263,7 @@ class SwipeKillHooks(private val module: XposedModule,
     private fun hookKillProcess() {
         try {
             val classCandidates = listOf(
+                "x3.d",
                 "com.oplus.athena.x3.d",
                 "oplus.athena.x3.d",
                 "com.oplus.athena.x3.e",

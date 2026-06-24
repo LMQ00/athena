@@ -76,6 +76,23 @@ object SwipeGuardViewModel : ViewModel() {
     }
 
     /**
+     * 批量添加包名到白名单。
+     * 如果其中有之前从系统默认中移除的包，则从 [userRemovals] 中恢复。
+     */
+    fun addPackages(packages: Set<String>) {
+        if (packages.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val current = _state.value
+            val nextConfig = current.config.copy(
+                userAdditions = current.config.userAdditions + packages,
+                userRemovals = current.config.userRemovals - packages
+            )
+            repository.save(nextConfig)
+            _state.value = current.copy(config = nextConfig)
+        }
+    }
+
+    /**
      * 从白名单中移除包名。
      * - 如果是系统默认 → 加入 [userRemovals]（标记移除）
      * - 如果是用户添加 → 从 [userAdditions] 中删除

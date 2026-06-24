@@ -14,6 +14,7 @@ local.properties
 *.aab
 *.jks
 *.keystore
+!config/signing/debug.keystore
 gradle-8.9-*.zip
 报错.log
 .gitignore

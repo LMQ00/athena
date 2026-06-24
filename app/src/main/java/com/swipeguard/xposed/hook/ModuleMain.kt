@@ -1,5 +1,6 @@
 package com.swipeguard.xposed.hook
 
+import android.content.SharedPreferences
 import android.util.Log
 import com.swipeguard.xposed.data.IConfigRepository
 import com.swipeguard.xposed.data.RemoteConfigRepository
@@ -52,6 +53,12 @@ class ModuleMain : XposedModule() {
 
     /** Athena 自有 API 杀进程拦截 Hook。 */
     private lateinit var athenaKillHooks: AthenaKillHooks
+
+    /** Athena Binder 入口拦截 Hook（在 com.oplus.athena 进程中安装）。 */
+    private var athenaBinderHooks: AthenaBinderHooks? = null
+
+    /** Athena 进程中配置热更新监听器，持有引用防止 GC。 */
+    private var athenaConfigListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
 
@@ -155,6 +162,7 @@ class ModuleMain : XposedModule() {
         OplusConfigHooks.updateConfig(config)
         if (::swipeKillHooks.isInitialized) swipeKillHooks.syncConfig(configRepo)
         if (::athenaKillHooks.isInitialized) athenaKillHooks.syncConfig(configRepo)
+        athenaBinderHooks?.syncConfig(configRepo)
         // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
     }
 
@@ -169,9 +177,41 @@ class ModuleMain : XposedModule() {
         )
     }
 
-    /** 应用包加载回调（system_server 中不触发，普通应用进程可选扩展点）。 */
+    /** 应用包加载回调。
+     * 当目标包为 com.oplus.athena 时，安装 Binder 入口拦截 Hook。 */
     override fun onPackageLoaded(param: PackageLoadedParam) {
-        // 当前实现聚焦 system_server 侧冻结策略；应用进程内暂无干预需求。
+        if (param.packageName == "com.oplus.athena") {
+            try {
+                // 在 Athena 进程中获取配置（若尚未初始化）
+                if (!::configRepo.isInitialized) {
+                    val prefs = getRemotePreferences(PREFS_NAME)
+                    configRepo = RemoteConfigRepository(prefs)
+                }
+                val classLoader = param.classLoader
+                athenaBinderHooks = AthenaBinderHooks(this, classLoader)
+                athenaBinderHooks?.syncConfig(configRepo)
+                athenaBinderHooks?.install()
+
+                // 注册配置热更新监听（Athena 进程独立 listener，跨进程需单独注册）
+                val prefs = getRemotePreferences(PREFS_NAME)
+                athenaConfigListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                    if (key == IConfigRepository.KEY_CONFIG_JSON || key == null) {
+                        try {
+                            config = configRepo.load()
+                            athenaBinderHooks?.syncConfig(configRepo)
+                            log(Log.INFO, TAG, "AthenaBinderHooks config hot-reloaded")
+                        } catch (t: Throwable) {
+                            log(Log.ERROR, TAG, "AthenaBinderHooks reload failed", t)
+                        }
+                    }
+                }
+                prefs.registerOnSharedPreferenceChangeListener(athenaConfigListener)
+
+                log(Log.INFO, TAG, "AthenaBinderHooks installed for com.oplus.athena")
+            } catch (t: Throwable) {
+                log(Log.ERROR, TAG, "AthenaBinderHooks install failed", t)
+            }
+        }
     }
 
     /** 应用 ClassLoader 就绪回调（system_server 中不触发）。 */

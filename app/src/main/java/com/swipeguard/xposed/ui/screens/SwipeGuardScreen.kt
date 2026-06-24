@@ -184,8 +184,8 @@ fun SwipeGuardScreen() {
     if (showAddSheet) {
         AddAppBottomSheet(
             currentPackages = effectiveApps,
-            onAdd = { pkg ->
-                scope.launch { SwipeGuardViewModel.addPackage(pkg) }
+            onAdd = { pkgs ->
+                scope.launch { SwipeGuardViewModel.addPackages(pkgs) }
             },
             onDismiss = { showAddSheet = false }
         )
@@ -383,14 +383,14 @@ private fun AppIcon(pkg: String, size: Int) {
 @Composable
 private fun AddAppBottomSheet(
     currentPackages: Set<String>,
-    onAdd: (String) -> Unit,
+    onAdd: (Set<String>) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var searchQuery by remember { mutableStateOf("") }
     var showSystemApps by remember { mutableStateOf(false) }
-    var selectedPkg by remember { mutableStateOf<String?>(null) }
+    var selectedPackages by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     // 异步加载应用列表
     var installedApps by remember { mutableStateOf<List<ApplicationInfo>>(emptyList()) }
@@ -466,8 +466,8 @@ private fun AddAppBottomSheet(
 
                 Spacer(Modifier.height(4.dp))
 
-                // 已选提示
-                selectedPkg?.let { pkg ->
+                // 已选计数
+                if (selectedPackages.isNotEmpty()) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = MaterialTheme.colorScheme.primaryContainer,
@@ -485,7 +485,7 @@ private fun AddAppBottomSheet(
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                getAppLabel(context, pkg),
+                                "已选 ${selectedPackages.size} 个应用",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
@@ -529,13 +529,15 @@ private fun AddAppBottomSheet(
                         items(filteredApps, key = { it.packageName }) { app ->
                             val pkg = app.packageName
                             val label = getAppLabel(context, pkg)
-                            val isSelected = pkg == selectedPkg
+                            val isSelected = pkg in selectedPackages
 
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(10.dp))
-                                    .clickable { selectedPkg = pkg },
+                                    .clickable {
+                                        selectedPackages = if (pkg in selectedPackages) selectedPackages - pkg else selectedPackages + pkg
+                                    },
                                 shape = RoundedCornerShape(10.dp),
                                 color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
                                         else Color.Transparent
@@ -567,15 +569,10 @@ private fun AddAppBottomSheet(
                                         )
                                     }
 
-                                    if (isSelected) {
-                                        Spacer(Modifier.width(8.dp))
-                                        Icon(
-                                            Icons.Filled.Check,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
+                                    Checkbox(
+                                        checked = isSelected,
+                                        onCheckedChange = null
+                                    )
                                 }
                             }
                         }
@@ -585,8 +582,8 @@ private fun AddAppBottomSheet(
         },
         confirmButton = {
             TextButton(
-                onClick = { selectedPkg?.let { onAdd(it); onDismiss() } },
-                enabled = selectedPkg != null
+                onClick = { onAdd(selectedPackages); onDismiss() },
+                enabled = selectedPackages.isNotEmpty()
             ) { Text("确认添加") }
         },
         dismissButton = {
