@@ -165,7 +165,7 @@ fun SwipeGuardScreen() {
                             },
                             enableDismissFromStartToEnd = false,
                             gesturesEnabled = true,
-                            modifier = Modifier.animateItemPlacement()
+                            modifier = Modifier.animateItem()
                         ) {
                             AppItemCard(
                                 pkg = pkg,
