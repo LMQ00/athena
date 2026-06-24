@@ -49,7 +49,6 @@ dependencies {
     compileOnly(libs.libxposed.api)
     implementation(libs.libxposed.service)
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.androidx.core.ktx)
 
     // Jetpack Compose
     implementation(platform(libs.androidx.compose.bom))

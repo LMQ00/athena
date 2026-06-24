@@ -1,3 +1,6 @@
+# 保留所有 Hook 类（不继承 XposedModule，由 ModuleMain 直接引用）
+-keep class com.swipeguard.xposed.hook.** { *; }
+
 # libxposed XposedModule 保留（所有生命周期回调方法）
 -keep class * extends io.github.libxposed.api.XposedModule {
     public <init>();

@@ -35,6 +35,9 @@ data class SwipeGuardConfig(
     /** 系统级默认白名单（逆向 Athena APK 提取 + 预置常用应用） */
     var systemDefaults: Set<String> = emptySet(),
 
+    /** 标记 systemDefaults 是否已被初始化；false=首次加载时自动填充预置值 */
+    var systemDefaultsInitialized: Boolean = false,
+
     /**
      * 写入 <whitePkg category="..."/> 的 category 编码。
      *
@@ -139,9 +142,15 @@ data class SwipeGuardConfig(
             runCatching {
                 val migrated = migrateFromV1(s)
                 val cfg = json.decodeFromString(serializer(), migrated)
-                // 首次使用时 systemDefaults 为空，填充预置默认值
-                if (cfg.systemDefaults.isEmpty()) cfg.copy(systemDefaults = KNOWN_SYSTEM_DEFAULTS)
-                else cfg
+                // 首次使用且未初始化时填充预置默认值（之后用户可自由清空）
+                if (!cfg.systemDefaultsInitialized && cfg.systemDefaults.isEmpty()) {
+                    cfg.copy(
+                        systemDefaults = KNOWN_SYSTEM_DEFAULTS,
+                        systemDefaultsInitialized = true
+                    )
+                } else {
+                    cfg
+                }
             }.getOrDefault(DEFAULT)
 
         fun toJson(config: SwipeGuardConfig): String =

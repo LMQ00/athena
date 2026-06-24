@@ -38,6 +38,10 @@ object OplusConfigHooks {
 
     private const val TAG = "SwipeGuard/OplusCfg"
 
+    /** hijackStream 重入守卫：防止 ctor Hook→readBytes→read Hook→递归触发。 */
+    @Volatile
+    private var inHijack = false
+
     /** 当前配置快照；通过 [updateConfig] 热更新，供所有 Hook 拦截闭包读取。 */
     @Volatile
     private var currentConfig: SwipeGuardConfig = SwipeGuardConfig.DEFAULT
@@ -430,6 +434,9 @@ object OplusConfigHooks {
         module: XposedModule,
         fis: FileInputStream,
     ) {
+        if (inHijack) return  // 重入守卫，防止 read Hook 递归触发
+        inHijack = true
+        try {
         // 读取原始内容；此处 read 调用会被本模块 read Hook 捕获，
         // 但 hijackedStreams 尚未登记该 fis，故会透传 proceed()。
         val originalBytes = fis.readBytes()
@@ -457,6 +464,8 @@ object OplusConfigHooks {
             "Elsa config hijacked: original=${originalBytes.size}B enhanced=${enhancedBytes.size}B " +
             "systemDefaults=${extractedDefaults.size} effective=${effectiveSet.size}"
         )
+    } finally {
+        inHijack = false
     }
 
     /**

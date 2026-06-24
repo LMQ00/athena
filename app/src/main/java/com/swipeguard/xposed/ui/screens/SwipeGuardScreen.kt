@@ -17,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -306,14 +308,21 @@ private fun AddAppDialog(
     var showSystemApps by remember { mutableStateOf(false) }
     var selectedPkg by remember { mutableStateOf<String?>(null) }
 
-    val installedApps = remember(showSystemApps, currentPackages) {
-        context.packageManager.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0))
-            .filter {
-                if (showSystemApps) true
-                else (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0
-            }
-            .filter { it.packageName !in currentPackages }
-            .sortedBy { getAppLabel(context, it.packageName).lowercase() }
+    val installedApps by produceState<List<ApplicationInfo>>(
+        initialValue = emptyList(),
+        key1 = showSystemApps,
+        key2 = currentPackages.size
+    ) {
+        withContext(Dispatchers.IO) {
+            context.packageManager.getInstalledApplications(
+                PackageManager.ApplicationInfoFlags.of(0))
+                .filter {
+                    if (showSystemApps) true
+                    else (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0
+                }
+                .filter { it.packageName !in currentPackages }
+                .sortedBy { getAppLabel(context, it.packageName).lowercase() }
+        }
     }
 
     val filteredApps = remember(searchQuery, installedApps) {

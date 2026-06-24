@@ -322,8 +322,8 @@ class SwipeKillHooks(private val module: XposedModule,
                 val s = arg as? String ?: continue
                 if (s.isEmpty()) continue
                 // 尝试从 clearInfo 格式解析: "pkgName:reason"
-                val semicolonIdx = s.indexOf(':')
-                val candidate = if (semicolonIdx > 0) s.substring(0, semicolonIdx) else s
+                val colonIdx = s.indexOf(':')
+                val candidate = if (colonIdx > 0) s.substring(0, colonIdx) else s
                 if ("." in candidate && !candidate.startsWith("android.")) return candidate
             }
         } catch (_: Throwable) {

@@ -21,7 +21,7 @@ ColorOS 16 的 Athena 系统组件维护一个**应用白名单**。划卡时，
 
 ## 安装
 1. 下载 APK 并在 LSPosed 中启用模块
-2. 作用域：**系统框架（system）**
+2. 作用域：选择 **系统框架（android）** 和 **com.oplus.athena**
 3. 重启设备
 4. 打开 SwipeGuard 添加想保护的 app
 
