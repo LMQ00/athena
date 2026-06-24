@@ -5,25 +5,6 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
-// 自动生成持久化 debug keystore（统一签名，避免每次重装卸载）
-val debugKeystore = rootProject.file("debug.keystore")
-if (!debugKeystore.exists()) {
-    val keytool = "${System.getProperty("java.home")}/bin/keytool"
-    project.exec {
-        commandLine(
-            keytool, "-genkey", "-v",
-            "-keystore", debugKeystore.absolutePath,
-            "-alias", "swipeguard",
-            "-keyalg", "RSA", "-keysize", "2048",
-            "-validity", "10000",
-            "-storepass", "android",
-            "-keypass", "android",
-            "-dname", "CN=SwipeGuard Debug, O=SwipeGuard, C=US"
-        )
-    }
-    logger.lifecycle("Created debug keystore at \${debugKeystore.absolutePath}")
-}
-
 android {
     namespace = "com.swipeguard.xposed"
     compileSdk = 37
@@ -36,19 +17,10 @@ android {
         versionName = "1.0.1"
     }
 
-    signingConfigs {
-        create("persistent") {
-            val keystoreFile = rootProject.file("debug.keystore")
-            keyAlias = "swipeguard"
-            keyPassword = "android"
-            storePassword = "android"
-            storeFile = keystoreFile
-        }
-    }
-
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("persistent")
+            // 使用 AGP 默认 debug.keystore（~/.android/debug.keystore），
+            // AGP 创建时用固定参数，所有环境签名一致
         }
         release {
             isMinifyEnabled = true
