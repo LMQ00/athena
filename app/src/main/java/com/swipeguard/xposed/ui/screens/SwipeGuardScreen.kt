@@ -2,6 +2,7 @@ package com.swipeguard.xposed.ui.screens
 
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.drawablePainter
 import androidx.compose.ui.text.font.FontWeight
@@ -269,12 +271,13 @@ private fun AppIcon(pkg: String, size: Int) {
         }
     }
     if (drawable != null) {
-        Icon(
+        Image(
             painter = drawablePainter(drawable),
             contentDescription = null,
             modifier = Modifier
                 .size(size.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Fit
         )
     }
 }
