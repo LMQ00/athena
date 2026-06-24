@@ -467,6 +467,7 @@ object OplusConfigHooks {
     } finally {
         inHijack = false
     }
+    }
 
     /**
      * 从劫持缓冲向 [buf] 的 `[off, off+len)` 区间写入数据。
