@@ -19,4 +19,7 @@ gradle-8.9-*.zip
 .gitignore
 *.log
 debug.keystore
-*.md
+progress.md
+research-swipeguard.md
+scout-code-path.md
+scout-failure-modes.md
