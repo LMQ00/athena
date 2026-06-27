@@ -15,11 +15,26 @@ import io.github.libxposed.api.XposedModule
  * 就终止调用链，更早也更可靠。
  *
  * 此 Hook 在 `com.oplus.athena` 进程中安装（不同于 system_server 侧的 SwipeKillHooks），
- * 通过 [ModuleMain.onPackageLoaded] 触发。
+ * 通过 [ModuleMain.onPackageReady] 触发。
  *
- * 拦截的 Binder code：
- * - 223 = clearProcess：划卡清理入口，Bundle 包含 packageName
- * - 201 = athenaKill3：批量 kill，List<Bundle> 逐个检查
+ * 逆向 Athena 6.0.1 确认的 Binder transact code（IAthenaService AIDL + 编译确认）：
+ *
+ * AIDL 源文件（从 APK 中提取）声明 codes 为 athenaKill=100, athenaFreeze=101,
+ * athenaKill2=102, athenaKill3=201, clearProcess=223。但 ColorOS AIDL 编译器
+ * 在生成 Stub 时对显式赋值的 code 加上了 IBinder.FIRST_CALL_TRANSACTION(=1)
+ * 的偏移，因此实际运行时使用的 code 比 AIDL 声明值大 1。
+ *
+ * 实际 Binder code（从 Smali .field 声明确认）：
+ * - 101 (0x65) = athenaKill（旧版单包杀，已废弃）
+ * - 102 (0x66) = athenaFreeze（冻结）
+ * - 103 (0x67) = athenaKill2（新版单包杀，6 参数）
+ * - 202 (0xca) = athenaKill3（新版批量 kill，List<Bundle>）
+ * - 224 (0xe0) = clearProcess（划卡清理入口，Bundle 含 packageName）
+ *
+ * 注意：OKillerBinder 实现的是 IAthenaKillerManager$Stub 而非 IAthenaService$Stub，
+ * 所以 IAthenaService 的 Binder 入口拦截仅捕获从 com.oplus.athena 进程内发出的
+ * 内部 kill 调用。真正的杀逻辑在 system_server 端由 RemoteService 执行，
+ * 已在 AthenaKillHooks 中以方法级别 hook 覆盖。
  */
 class AthenaBinderHooks(
     private val module: XposedModule,
@@ -67,13 +82,17 @@ class AthenaBinderHooks(
                         .intercept { chain ->
                             if (!enabled) return@intercept chain.proceed()
                             val code = chain.getArg(0) as? Int ?: return@intercept chain.proceed()
+                            // 实际 Binder code（从 Smali 确认，比 AIDL 声明大 1）：
+                            // clearProcess=0xe0(224), athenaKill3=0xca(202),
+                            // athenaKill=0x65(101), athenaKill2=0x67(103)
+                            // 101/103 由 AthenaKillHooks 在 system_server 端以方法级别 hook 拦截
                             when (code) {
-                                223 -> handleClearProcess(chain)
-                                201 -> handleAthenaKill3(chain)
+                                224 -> handleClearProcess(chain)
+                                202 -> handleAthenaKill3(chain)
                                 else -> chain.proceed()
                             }
                         }
-                    module.log(Log.INFO, tag, "IAthenaService.Stub.onTransact hooked")
+                    module.log(Log.INFO, tag, "IAthenaService.Stub.onTransact hooked. code=224(clearProcess) 202(athenaKill3)")
                     return
                 }
             }
@@ -85,7 +104,7 @@ class AthenaBinderHooks(
     }
 
     /**
-     * 处理 clearProcess (Binder code 223) 调用。
+     * 处理 clearProcess (Binder code 224, 0xe0) 调用。
      * 从 data Parcel 中还原 Bundle，提取 packageName 检查白名单。
      * 白名单包名 → 拦截调用、写 reply 并返回 true（Binder 已处理语义）。
      */
@@ -117,12 +136,13 @@ class AthenaBinderHooks(
     }
 
     /**
-     * 处理 athenaKill3 (Binder code 201) 调用。
+     * 处理 athenaKill3 (Binder code 202, 0xca) 调用。
      * 从 data Parcel 中还原 List<Bundle>，逐个检查包名。
-     * 有任意白名单包名 → 记录日志并放行（由调用方决定是否全量拦截或部分拦截）。
+     * 有任意白名单包名 → 全量拦截（因为 Binder 层面无法从 Parcel 中移除单个条目）。
      *
-     * 当前策略：仅做日志记录，不拦截 athenaKill3。原因是批量 kill 中
-     * 可能混有白名单和非白名单包，全部拦截会阻止合法清理。
+     * 权衡：全量拦截可能影响同一批中非白名单 app 的清理。
+     * 但 athenaKill3 通常由内存压力或系统级清理触发，不是划卡入口；
+     * 白名单 app 的优先级高于非白名单 app 的清理效率。
      */
     private fun handleAthenaKill3(chain: XposedInterface.Chain): Any? {
         try {
@@ -135,23 +155,26 @@ class AthenaBinderHooks(
                 data.setDataPosition(startPos)
             }
             if (bundleList != null) {
-                val blockedPkgs = mutableListOf<String>()
-                for (item in bundleList) {
-                    val bundle = item as? Bundle ?: continue
+                val hasProtected = bundleList.any { item ->
+                    val bundle = item as? Bundle ?: return@any false
                     val pkg = bundle.getString("packageName")
                         ?: bundle.getString("pkg")
-                        ?: continue
-                    if (pkg in effectiveSet) blockedPkgs.add(pkg)
+                        ?: return@any false
+                    pkg in effectiveSet
                 }
-                if (blockedPkgs.isNotEmpty()) {
+                if (hasProtected) {
                     module.log(
                         Log.INFO, tag,
-                        "athenaKill3 contains protected: ${blockedPkgs.joinToString()} (passing through)"
+                        "Blocked athenaKill3: contains protected apps"
                     )
+                    val reply = chain.getArg(2) as? Parcel
+                    reply?.writeNoException()
+                    reply?.writeInt(0)
+                    return true
                 }
             }
         } catch (_: Throwable) {
-            // Parcel 解析异常 → 放行
+            // Parcel 解析异常 → 放行，避免误杀正常调用
         }
         return chain.proceed()
     }

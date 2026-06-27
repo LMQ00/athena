@@ -44,6 +44,11 @@ class SwipeKillHooks(private val module: XposedModule,
         hookForceStopPackageAndSaveActivity()
         hookOplusActivityManagerForceStop()
         hookKillProcess()
+        hookProcessKillProcess()
+        module.log(
+            Log.INFO, tag,
+            "Install complete. effectiveSet size=${effectiveSet.size}, enabled=$enabled"
+        )
     }
 
     /**
@@ -314,8 +319,12 @@ class SwipeKillHooks(private val module: XposedModule,
     /**
      * 从 killProcess 的参数中提取包名。
      * x3.d.killProcess 的典型签名：killProcess(String clearInfo, int pid, ...)
-     * clearInfo 格式通常为 "pkgName:reason" 或直接是包名。
-     * 遍历所有 String 参数，用 "含点且非 android. 开头" 启发式识别包名。
+     * clearInfo 格式可能有多种变体：
+     *   - "pkgName:reason"（冒号分割）
+     *   - "kill clearInfo=pkgName:reason"（带前缀 + 等号）
+     *   - "clearInfo=pkgName:reason"（等号 + 冒号）
+     *   - 直接包名
+     * 遍历所有 String 参数，用多种启发式尝试提取包名。
      */
     private fun extractPkgFromKillProcess(chain: XposedInterface.Chain): String? {
         try {
@@ -323,11 +332,87 @@ class SwipeKillHooks(private val module: XposedModule,
             for (arg in args) {
                 val s = arg as? String ?: continue
                 if (s.isEmpty()) continue
-                // 尝试从 clearInfo 格式解析: "pkgName:reason"
-                val colonIdx = s.indexOf(':')
-                val candidate = if (colonIdx > 0) s.substring(0, colonIdx) else s
-                if ("." in candidate && !candidate.startsWith("android.")) return candidate
+
+                // 收集所有候选字符串，优先级：等号后 > 原始串
+                // 格式 "clearInfo=pkgName:reason" 中等号后的才是包名前缀
+                val candidates = mutableListOf<String>()
+
+                // 格式: "kill clearInfo=pkgName:reason" 或 "clearInfo=pkgName:reason"
+                // 等号后面的内容优先级更高（去掉前缀后的实际参数）
+                val eqIdx = s.indexOf('=')
+                if (eqIdx >= 0 && eqIdx < s.length - 1) {
+                    val afterEq = s.substring(eqIdx + 1).trim()
+                    candidates.add(afterEq)
+                }
+                // 原始字符串整体（作为 fallback）
+                candidates.add(s)
+
+                for (candidate in candidates) {
+                    // 先尝试冒号分割（pkgName:reason 或 pkgName:reason:subReason）
+                    val colonIdx = candidate.indexOf(':')
+                    val beforeColon = if (colonIdx > 0) candidate.substring(0, colonIdx) else candidate
+                    // 空格分割（kill clearInfo=... → 取最后一段）
+                    val parts = beforeColon.split(' ')
+                    for (part in parts) {
+                        val trimmed = part.trim()
+                        if (trimmed.isEmpty()) continue
+                        if ("." in trimmed && !trimmed.startsWith("android.")) {
+                            return trimmed
+                        }
+                    }
+                }
             }
+        } catch (_: Throwable) {
+        }
+        return null
+    }
+
+    /**
+     * 路径 6: android.os.Process.killProcess — 最终防线
+     *
+     * 逆向报告显示 x3.d.killProcess 最终调用 Process.killProcess(pid)。
+     * 如果所有上游 Hook 都未拦截到（类名变化、混淆更新），
+     * 此 Hook 作为最后一道防线。
+     *
+     * 局限：Process.killProcess(int pid) 只接收 pid 不接收包名，
+     * 需要通过 /proc/pid/cmdline 反查包名。
+     */
+    private fun hookProcessKillProcess() {
+        try {
+            val processClass = Class.forName("android.os.Process", false, classLoader)
+            val method = processClass.getDeclaredMethod(
+                "killProcess", Int::class.javaPrimitiveType
+            )
+            module.hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    val pid = chain.getArg(0) as Int
+                    if (pid <= 0) return@intercept chain.proceed()
+                    val pkg = getPkgByPid(pid)
+                    if (shouldProtect(pkg)) {
+                        module.log(
+                            Log.INFO, tag,
+                            "Blocked Process.killProcess for $pkg (pid=$pid)"
+                        )
+                        return@intercept null
+                    }
+                    chain.proceed()
+                }
+            module.log(Log.INFO, tag, "Hook installed: Process.killProcess")
+        } catch (t: Throwable) {
+            module.log(Log.WARN, tag, "Process.killProcess hook failed: ${t.message}")
+        }
+    }
+
+    /** 通过 pid 读取 /proc/pid/cmdline 反查包名。 */
+    private fun getPkgByPid(pid: Int): String? {
+        try {
+            val cmdline = java.io.File("/proc/$pid/cmdline")
+                .readBytes()
+                .toString(Charsets.UTF_8)
+                .trim('\u0000')
+                .trim()
+            if (cmdline.isNotEmpty() && "." in cmdline) return cmdline
         } catch (_: Throwable) {
         }
         return null

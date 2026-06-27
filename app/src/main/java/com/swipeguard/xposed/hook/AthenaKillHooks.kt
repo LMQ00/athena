@@ -37,10 +37,17 @@ class AthenaKillHooks(private val module: XposedModule,
         hookMethod("athenaKill2")
         hookMethod("athenaKill3")   // 新版批量 kill（code 201）
         hookMethod("clearProcess")
+        module.log(
+            Log.INFO, tag,
+            "Install complete. effectiveSet size=${effectiveSet.size}, enabled=$enabled"
+        )
     }
 
     private fun hookMethod(methodName: String) {
         val candidates = listOf(
+            // RemoteService 是实际包含 athenaKill/clearProcess 的 IAthenaService.Stub 实现类
+            // 运行在 system 进程（与 system_server 同进程），逆向 Athena 6.0.1 确认
+            "com.oplus.athena.systemservice.transact.RemoteService",
             "com.oplus.athena.systemservice.OplusAthenaSystemService",
             "com.android.server.am.OplusAthenaAmManager",
             "oplus.app.AthenaServiceInternal"
