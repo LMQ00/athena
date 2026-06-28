@@ -117,7 +117,13 @@ class ModuleMain : XposedModule() {
             var failed = 0
 
             if (tryInstall("OplusConfigHooks") {
-                OplusConfigHooks.install(this, config, classLoader, mutableListOf())
+                OplusConfigHooks.install(
+                    module = this,
+                    config = config,
+                    classLoader = classLoader,
+                    handles = mutableListOf(),
+                    prefs = prefs,  // 传递 RemotePreferences 引用用于持久化系统默认白名单
+                )
             }) installed++ else failed++
 
             if (tryInstall("SwipeKillHooks") {

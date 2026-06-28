@@ -41,12 +41,6 @@ object OplusConfigHooks {
 
     private const val TAG = "SwipeGuard/OplusCfg"
 
-    /**
-     * SharedPreferences 文件名，必须与 UI 进程和 [RemoteConfigRepository] 一致。
-     * 用于持久化从设备 XML 提取的系统默认白名单。
-     */
-    private const val PREFS_NAME = "swipeguard_config"
-
     /** hijackStream 重入守卫：防止 ctor Hook→readBytes→read Hook→递归触发。 */
     @Volatile
     private var inHijack = false
@@ -65,6 +59,9 @@ object OplusConfigHooks {
     /** 共享的 RemotePreferences 引用（用于回写提取的系统默认白名单）。 */
     @Volatile
     private var remotePrefs: SharedPreferences? = null
+
+    /** 本地模式标记：无 SharedPreferences 时仅日志不持久化。 */
+    private var noPrefsMode: Boolean = false
 
     /** 自启动白名单文件名（相对路径，readConfig 第二参数）。 */
     private const val AUTOSTART_WHITELIST_FILE = "startup/autostart_white_list.txt"
@@ -102,6 +99,7 @@ object OplusConfigHooks {
      * Hook，调用方需自行控制；当前仅 [ModuleMain.onSystemServerStarting] 调用一次）。
      *
      * @param config   当前 SwipeGuard 配置快照；Hook 闭包捕获此引用，由 [ModuleMain] 热更新
+     * @param prefs    可选 SharedPreferences 引用，用于持久化提取的系统默认白名单
      * @param handles  安装成功的 Hook 句柄将追加到此列表，便于统一卸载 / hot-reload
      */
     fun install(
@@ -109,16 +107,14 @@ object OplusConfigHooks {
         config: SwipeGuardConfig,
         classLoader: ClassLoader,
         handles: MutableList<XposedInterface.HookHandle>,
+        prefs: SharedPreferences? = null,
     ) {
         currentConfig = config
         currentEffectiveSet = (config.systemDefaults - config.userRemovals) + config.userAdditions
 
-        // 保存 RemotePreferences 引用，供 hijackStream 回写系统默认白名单
-        remotePrefs = try {
-            module.getRemotePreferences(PREFS_NAME)
-        } catch (_: Throwable) {
-            null
-        }
+        // 保存 SharedPreferences 引用，供 hijackStream 回写系统默认白名单
+        remotePrefs = prefs
+        noPrefsMode = prefs == null
 
         installOplusSettingsReadConfig(module, config, classLoader, handles)
         installElsaConfigFileInputStream(module, config, handles)
