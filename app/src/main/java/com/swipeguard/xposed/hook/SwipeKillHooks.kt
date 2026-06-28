@@ -385,13 +385,13 @@ class SwipeKillHooks(private val module: XposedModule,
 
     companion object {
         // 从 "key=pkgName:reason" 类型的字符串中提取 pkgName
-        private val EQ_PKG_REGEX = Regex("""=\s*([a-zA-Z_][\w.]*[a-zA-Z\w])\s*:""")
+        internal val EQ_PKG_REGEX = Regex("""=\s*([a-zA-Z_][\w.]*[a-zA-Z\w])\s*:""")
 
         // 从 "pkgName:reason" 类型的字符串中提取 pkgName
-        private val COLON_PKG_REGEX = Regex("""^([a-zA-Z_][\w.]*[a-zA-Z\w])\s*:""")
+        internal val COLON_PKG_REGEX = Regex("""^([a-zA-Z_][\w.]*[a-zA-Z\w])\s*:""")
 
         // 直接匹配标准包名格式（至少两段，如 com.example.app）
-        private val DIRECT_PKG_REGEX = Regex("""([a-zA-Z_][\w.]*\.[a-zA-Z_][\w.]+)""")
+        internal val DIRECT_PKG_REGEX = Regex("""([a-zA-Z_][\w.]*\.[a-zA-Z_][\w.]+)""")
     }
 
     /**
