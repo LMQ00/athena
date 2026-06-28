@@ -135,9 +135,10 @@ class ModuleMain : XposedModule() {
 
             // 新增：运行时 whitePkg 查询拦截（OFreezer 决策层保护）
             if (tryInstall("WhitePkgLookupHooks") {
-                whitePkgLookupHooks = WhitePkgLookupHooks(this, classLoader)
-                whitePkgLookupHooks.syncConfig(configRepo)
-                whitePkgLookupHooks.install()
+                val hooks = WhitePkgLookupHooks(this, classLoader)
+                hooks.syncConfig(configRepo)
+                hooks.install()
+                whitePkgLookupHooks = hooks
             }) installed++ else failed++
 
             // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
