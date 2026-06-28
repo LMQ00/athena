@@ -61,16 +61,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: 构建 Debug APK
-        run: |
-          set +e
-          ./gradlew assembleDebug --stacktrace 2>&1 | tee gradle-output.log
-          EXIT_CODE=${PIPESTATUS[0]}
-          set -e
-          echo '### Gradle Build Log (tail -100)' >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          tail -100 gradle-output.log >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          exit $EXIT_CODE
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: 摘要 — APK 信息
         run: |

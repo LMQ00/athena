@@ -1,10 +1,7 @@
 package com.swipeguard.xposed.hook
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.util.Log
-import com.swipeguard.xposed.data.IConfigRepository
-import com.swipeguard.xposed.data.JsonCodec
 import com.swipeguard.xposed.model.SwipeGuardConfig
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
@@ -56,13 +53,6 @@ object OplusConfigHooks {
     @Volatile
     private var currentEffectiveSet: Set<String> = emptySet()
 
-    /** 共享的 RemotePreferences 引用（用于回写提取的系统默认白名单）。 */
-    @Volatile
-    private var remotePrefs: SharedPreferences? = null
-
-    /** 本地模式标记：无 SharedPreferences 时仅日志不持久化。 */
-    private var noPrefsMode: Boolean = false
-
     /** 自启动白名单文件名（相对路径，readConfig 第二参数）。 */
     private const val AUTOSTART_WHITELIST_FILE = "startup/autostart_white_list.txt"
 
@@ -99,7 +89,6 @@ object OplusConfigHooks {
      * Hook，调用方需自行控制；当前仅 [ModuleMain.onSystemServerStarting] 调用一次）。
      *
      * @param config   当前 SwipeGuard 配置快照；Hook 闭包捕获此引用，由 [ModuleMain] 热更新
-     * @param prefs    可选 SharedPreferences 引用，用于持久化提取的系统默认白名单
      * @param handles  安装成功的 Hook 句柄将追加到此列表，便于统一卸载 / hot-reload
      */
     fun install(
@@ -107,14 +96,9 @@ object OplusConfigHooks {
         config: SwipeGuardConfig,
         classLoader: ClassLoader,
         handles: MutableList<XposedInterface.HookHandle>,
-        prefs: SharedPreferences? = null,
     ) {
         currentConfig = config
         currentEffectiveSet = (config.systemDefaults - config.userRemovals) + config.userAdditions
-
-        // 保存 SharedPreferences 引用，供 hijackStream 回写系统默认白名单
-        remotePrefs = prefs
-        noPrefsMode = prefs == null
 
         installOplusSettingsReadConfig(module, config, classLoader, handles)
         installElsaConfigFileInputStream(module, config, handles)
@@ -463,10 +447,6 @@ object OplusConfigHooks {
         val cfg = currentConfig
         val effectiveSet = (extractedDefaults - cfg.userRemovals) + cfg.userAdditions
 
-        // ★ 将设备真实系统默认白名单写回 SharedPreferences，
-        //   确保 SwipeKillHooks/AthenaKillHooks/WhitePkgLookupHooks 使用正确的 systemDefaults
-        persistExtractedDefaults(extractedDefaults)
-
         // 模块禁用或有效白名单为空时无需改写
         if (!cfg.enabled || effectiveSet.isEmpty()) {
             module.log(Log.DEBUG, TAG, "Config empty/disabled, skip elsa hijack.")
@@ -487,73 +467,6 @@ object OplusConfigHooks {
     } finally {
         inHijack = false
     }
-    }
-
-    // ------------------------------------------------------------------
-    // 系统默认白名单持久化
-    // ------------------------------------------------------------------
-
-    /**
-     * 将从设备 XML 中提取的系统默认白名单写回 SharedPreferences，
-     * 使 [SwipeKillHooks]、[AthenaKillHooks] 和 [WhitePkgLookupHooks]
-     * 使用正确的系统默认值，而非硬编码的 [SwipeGuardConfig.Companion.KNOWN_SYSTEM_DEFAULTS]。
-     *
-     * 仅在以下条件满足时写入：
-     * 1. [remotePrefs] 可用（已在 [install] 时获取）
-     * 2. 提取的默认集非空
-     * 3. 提取的默认集与当前配置的 systemDefaults 不同（避免每次启动都刷盘）
-     *
-     * 写入后通过 Binder 同步到 UI 进程的本地 SharedPreferences，
-     * 持久化存储，下次启动时 [SwipeGuardConfig.fromJson] 直接加载设备真实值。
-     *
-     * 使用 [commit] 而非 [apply] 以确保数据在后续 Hook 初始化前落盘。
-     */
-    private fun persistExtractedDefaults(extractedDefaults: Set<String>) {
-        if (extractedDefaults.isEmpty()) return
-        val prefs = remotePrefs ?: return
-        try {
-            // 读取当前配置，检查是否已有更完整的 systemDefaults
-            val currentJson = prefs.getString(IConfigRepository.KEY_CONFIG_JSON, null)
-            if (currentJson.isNullOrEmpty()) return
-            val currentCfg = JsonCodec.decode(currentJson)
-
-            // 仅在提取的默认集比当前 systemDefaults 更大或更新时才写回
-            // 避免覆盖用户手动清空的 systemDefaults
-            if (!currentCfg.systemDefaultsInitialized) {
-                // systemDefaults 尚未初始化（首次加载），跳过
-                return
-            }
-
-            // 如果提取的默认集 > 当前硬编码默认集，说明设备有更多系统条目
-            val currentDefaults = currentCfg.systemDefaults
-            if (extractedDefaults.size <= currentDefaults.size &&
-                currentDefaults.containsAll(extractedDefaults)
-            ) {
-                return  // 当前默认集已足够完整，无需更新
-            }
-
-            // 合并：保留 currentDefaults 中已有的条目，补充提取的新条目
-            val merged = currentDefaults + extractedDefaults
-            val updatedCfg = currentCfg.copy(systemDefaults = merged)
-            val updatedJson = JsonCodec.encode(updatedCfg)
-
-            prefs.edit().putString(IConfigRepository.KEY_CONFIG_JSON, updatedJson).commit()
-
-            Log.i(
-                TAG,
-                "System defaults updated: ${currentDefaults.size} → ${merged.size} " +
-                "(added ${merged.size - currentDefaults.size} from device XML)"
-            )
-
-            // 同步到本地快照，确保当前进程中的后续 Hook 立即生效
-            // currentConfig 在此处更新，但 currentConfig.systemDefaults 是 data class 字段
-            // 需要整体替换
-            val newCfg = currentConfig.copy(systemDefaults = merged)
-            updateConfig(newCfg)
-        } catch (t: Throwable) {
-            // 持久化失败不阻塞 XML 注入逻辑；仅 WARN 日志
-            Log.w(TAG, "Failed to persist extracted system defaults", t)
-        }
     }
 
     /**
