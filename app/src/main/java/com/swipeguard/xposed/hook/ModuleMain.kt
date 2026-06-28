@@ -54,6 +54,9 @@ class ModuleMain : XposedModule() {
     /** Athena 自有 API 杀进程拦截 Hook。 */
     private lateinit var athenaKillHooks: AthenaKillHooks
 
+    /** OFreezer 运行时白名单查询拦截 Hook（决策层保护）。 */
+    private var whitePkgLookupHooks: WhitePkgLookupHooks? = null
+
     /** Athena Binder 入口拦截 Hook（在 com.oplus.athena 进程中运行）。 */
     private var athenaBinderHooks: AthenaBinderHooks? = null
 
@@ -130,6 +133,15 @@ class ModuleMain : XposedModule() {
                 athenaKillHooks.install()
             }) installed++ else failed++
 
+            // ★ 新增：运行时 whitePkg 查询拦截（OFreezer 决策层保护）
+            // 使 OFreezer 在 kill 决策阶段就认为白名单应用在白名单中，
+            // 从而完全跳过杀进程路径。与 SwipeKillHooks 形成决策+执行双层保护。
+            if (tryInstall("WhitePkgLookupHooks") {
+                whitePkgLookupHooks = WhitePkgLookupHooks(this, classLoader)
+                whitePkgLookupHooks.syncConfig(configRepo)
+                whitePkgLookupHooks.install()
+            }) installed++ else failed++
+
             // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
 
             if (failed == 0) {
@@ -162,6 +174,7 @@ class ModuleMain : XposedModule() {
         OplusConfigHooks.updateConfig(config)
         if (::swipeKillHooks.isInitialized) swipeKillHooks.syncConfig(configRepo)
         if (::athenaKillHooks.isInitialized) athenaKillHooks.syncConfig(configRepo)
+        whitePkgLookupHooks?.syncConfig(configRepo)
         athenaBinderHooks?.syncConfig(configRepo)
         // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
     }

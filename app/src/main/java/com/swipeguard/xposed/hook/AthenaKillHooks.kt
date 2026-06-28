@@ -50,7 +50,11 @@ class AthenaKillHooks(private val module: XposedModule,
             "com.oplus.athena.systemservice.transact.RemoteService",
             "com.oplus.athena.systemservice.OplusAthenaSystemService",
             "com.android.server.am.OplusAthenaAmManager",
-            "oplus.app.AthenaServiceInternal"
+            "oplus.app.AthenaServiceInternal",
+            // 新版 / 备用名
+            "com.oplus.athena.systemservice.h1",
+            "com.oplus.athena.systemservice.transact.KillService",
+            "com.oplus.athena.systemservice.KillManagerService",
         )
         for (clsName in candidates) {
             try {
@@ -97,18 +101,36 @@ class AthenaKillHooks(private val module: XposedModule,
             for (i in types.indices) {
                 if (types[i] != String::class.java) continue
                 val v = chain.getArg(i) as? String ?: continue
-                if ("." in v && !v.startsWith("android.")) return v
+                if (isValidPackageName(v)) return v
             }
             // Bundle 参数中找
             for (i in types.indices) {
                 if (types[i].name != "android.os.Bundle") continue
                 val b = chain.getArg(i) as? android.os.Bundle ?: continue
-                for (k in listOf("pkg", "KEY_PKG_NAME", "caller_package")) {
-                    b.getString(k)?.let { if ("." in it) return it }
+                for (k in listOf("pkg", "KEY_PKG_NAME", "caller_package",
+                        "packageName", "package_name", "killPkg")) {
+                    b.getString(k)?.let { if (isValidPackageName(it)) return it }
                 }
             }
         } catch (_: Throwable) {
         }
         return null
+    }
+
+    /**
+     * 判断字符串是否为有效的 Android 包名。
+     * 规则：至少包含一个点，不以 "android." 或 "java." 开头，
+     * 不包含空格/控制字符，不是 IP 地址或文件路径。
+     */
+    private fun isValidPackageName(s: String): Boolean {
+        if (s.length < 3 || s.length > 255) return false
+        if (!s.contains('.')) return false
+        if (s.startsWith("android.") || s.startsWith("java.") ||
+            s.startsWith("dalvik.") || s.startsWith("com.android.")) return false
+        // 排除 IP 地址、文件路径等非包名
+        if (s.matches(Regex("""\d+(\.\d+)+"""))) return false  // IP 地址
+        if (s.startsWith("/") || s.startsWith("\\")) return false  // 文件路径
+        if (s.contains(' ')) return false  // 含空格
+        return true
     }
 }
