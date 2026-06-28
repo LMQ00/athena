@@ -4,6 +4,7 @@ import android.util.Log
 import com.swipeguard.xposed.data.RemoteConfigRepository
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
+import java.lang.reflect.Method
 
 /**
  * OFreezer 3.0 运行时白名单查询拦截 Hook。
