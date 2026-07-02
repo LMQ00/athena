@@ -41,21 +41,31 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Accept licenses + install SDK 36
+      - name: Debug - check Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "JAVA_HOME=$JAVA_HOME"
+          which java
+          java -version 2>&1
+          ls -la $ANDROID_HOME/ 2>&1 || echo "ANDROID_HOME not found"
+          ls -la $ANDROID_HOME/cmdline-tools/ 2>&1 || echo "No cmdline-tools"
+          ls -la $ANDROID_HOME/platforms/ 2>&1 || echo "No platforms"
+          echo "--- test gradle ---"
+          chmod +x gradlew
+          ./gradlew --version 2>&1 || echo "gradle failed"
+
+      - name: Accept licenses
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 || true
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 'platforms;android-36' 2>&1 || true
-          # Verify
-          ls -d $ANDROID_HOME/platforms/*/ 2>&1 || echo "No platforms installed"
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 'platforms;android-35' 2>&1 || true
+          ls -d $ANDROID_HOME/platforms/*/ 2>&1 || true
 
       - name: Configure local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: Grant gradlew
-        run: chmod +x gradlew
-
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug 2>&1
+      - name: Build
+        run: |
+          ./gradlew assembleDebug 2>&1
         env:
           KEYSTORE_DEBUG_PASSWORD: ${{ secrets.KEYSTORE_DEBUG_PASSWORD || 'android' }}
 
