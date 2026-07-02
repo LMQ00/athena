@@ -43,11 +43,12 @@ jobs:
       - name: 安装 target SDK
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
-            --install \
-            "platforms;android-${{ env.COMPILE_SDK }}" \
-            "build-tools;36.0.0" \
-            "platform-tools" \
-            2>&1
+            --install "platforms;android-${{ env.COMPILE_SDK }}" 2>&1 || {
+            echo "⚠️ SDK ${{ env.COMPILE_SDK }} 安装失败"
+            $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list 2>/dev/null | grep "platforms;" | tail -5
+            exit 1
+          }
+          echo "✅ SDK ${{ env.COMPILE_SDK }} 就绪"
 
       - name: 配置 local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties

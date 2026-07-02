@@ -69,13 +69,13 @@ jobs:
 
       - name: 安装 target SDK
         run: |
-          # 安装 target SDK 及其系统镜像
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
-            --install \
-            "platforms;android-${{ env.COMPILE_SDK }}" \
-            "build-tools;36.0.0" \
-            "platform-tools" \
-            2>&1
+          echo -e "y\n" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            --sdk_root=$ANDROID_HOME \
+            --install "platforms;android-${{ env.COMPILE_SDK }}" 2>&1 || {
+            echo "⚠️ SDK ${{ env.COMPILE_SDK }} 安装失败，列出可用平台:"
+            $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list 2>/dev/null | grep "platforms;android-" | tail -10
+            exit 1
+          }
           echo "✅ SDK ${{ env.COMPILE_SDK }} 就绪"
 
       - name: 配置 local.properties
