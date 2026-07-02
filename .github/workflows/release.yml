@@ -40,14 +40,16 @@ jobs:
       - name: 设置 Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: 安装 target SDK
+      - name: 创建许可 + 安装 SDK
         run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
-            --install "platforms;android-${{ env.COMPILE_SDK }}" 2>&1 || {
-            echo "⚠️ SDK ${{ env.COMPILE_SDK }} 安装失败"
-            $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list 2>/dev/null | grep "platforms;" | tail -5
-            exit 1
-          }
+          mkdir -p "$ANDROID_HOME/licenses"
+          cat > "$ANDROID_HOME/licenses/android-sdk-license" << 'EOF'
+          8933bad161af4178b1185d1a37fbf41ea5269c55
+          d56f5187479451eabf01fb78af6dfcb131a6481e
+          24333f8a63b6825ea9c5514f83c2829b004d1fee
+          EOF
+          echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-${{ env.COMPILE_SDK }}" 2>&1
           echo "✅ SDK ${{ env.COMPILE_SDK }} 就绪"
 
       - name: 配置 local.properties
