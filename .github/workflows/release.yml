@@ -156,7 +156,7 @@ jobs:
 
       - name: Create Release
         if: steps.build-step.outputs.exit_code == '0'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.get-version.outputs.tag }}
           name: SwipeGuard ${{ steps.get-version.outputs.version }}
