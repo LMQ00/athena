@@ -27,9 +27,9 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
 
-      - name: Install SDK and accept all licenses
+      - name: Install SDK + accept licenses
+        id: sdk-setup
         run: |
-          # Use sdkmanager with proper license acceptance
           export ANDROID_HOME=$HOME/android
           mkdir -p $ANDROID_HOME
           cd /tmp
@@ -39,29 +39,61 @@ jobs:
           mv cmdline-tools $ANDROID_HOME/cmdline-tools/latest
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           
-          # Accept ALL licenses by piping yes 100 times
-          for i in $(seq 1 100); do echo "y"; done | \
-            sdkmanager --sdk_root=$ANDROID_HOME --licenses 2>&1
+          # Accept licenses with explicit yes
+          yes | sdkmanager --sdk_root=$ANDROID_HOME --licenses 2>&1
+          if [ $? -ne 0 ]; then
+            echo "License acceptance with yes failed, trying seq approach"
+            for i in $(seq 1 100); do echo y; done | sdkmanager --sdk_root=$ANDROID_HOME --licenses 2>&1
+          fi
           
-          # Install SDK 36 + platform-tools
-          echo "y" | sdkmanager --sdk_root=$ANDROID_HOME "platforms;android-36" 2>&1
-          echo "y" | sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" 2>&1
+          # Install
+          yes | sdkmanager --sdk_root=$ANDROID_HOME "platforms;android-36" 2>&1
           
-          # Verify
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "sdk.dir=$ANDROID_HOME" > $GITHUB_WORKSPACE/local.properties
-          echo "Installed platforms:" && ls -d $ANDROID_HOME/platforms/*/
 
       - name: Grant execute permission
         run: chmod +x gradlew
 
-      - name: Build
-        run: ./gradlew assembleDebug
+      - name: Build (output to file)
+        id: build-step
+        continue-on-error: true
+        run: |
+          set +e
+          ./gradlew assembleDebug --stacktrace > build_output.txt 2>&1
+          EC=$?
+          echo "exit_code=$EC" >> $GITHUB_OUTPUT
         env:
           KEYSTORE_DEBUG_PASSWORD: android
 
+      - name: Show build output (last 100 lines)
+        if: always()
+        run: |
+          if [ -f build_output.txt ]; then
+            LINES=$(wc -l < build_output.txt)
+            echo "## Build Output (last 100 of $LINES lines)" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -100 build_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build_output.txt
+          if-no-files-found: ignore
+
+      - name: Exit with build result
+        if: steps.build-step.outputs.exit_code != '0'
+        run: |
+          echo "Build failed with exit code ${{ steps.build-step.outputs.exit_code }}"
+          exit ${{ steps.build-step.outputs.exit_code }}
+
       - name: Upload APK
+        if: steps.build-step.outputs.exit_code == '0'
         uses: actions/upload-artifact@v4
         with:
           name: SwipeGuard-debug
