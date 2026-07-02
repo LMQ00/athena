@@ -10,6 +10,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url = uri("https://api.libxposed.com/maven") }
     }
 }
 rootProject.name = "SwipeGuard"

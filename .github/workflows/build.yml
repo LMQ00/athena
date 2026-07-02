@@ -57,7 +57,7 @@ jobs:
       - name: Accept licenses
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 || true
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 'platforms;android-35' 2>&1 || true
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 'platforms;android-36' 2>&1 || true
           ls -d $ANDROID_HOME/platforms/*/ 2>&1 || true
 
       - name: Configure local.properties
@@ -65,9 +65,19 @@ jobs:
 
       - name: Build
         run: |
-          ./gradlew assembleDebug 2>&1
+          set -o pipefail
+          ./gradlew assembleDebug --stacktrace 2>&1 | tee gradle.log
         env:
           KEYSTORE_DEBUG_PASSWORD: ${{ secrets.KEYSTORE_DEBUG_PASSWORD || 'android' }}
+
+      - name: Upload build log (even on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: gradle.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
