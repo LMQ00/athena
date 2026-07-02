@@ -34,27 +34,31 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      - name: Set up Android SDK (with licenses)
-        uses: android-actions/setup-android@v3
-
-      - name: Create license files and install platforms
+      - name: Fresh install Android SDK + licenses + platforms
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          # Create license directory
-          mkdir -p "$ANDROID_HOME/licenses"
-          # Write SDK licenses (well-known hashes)
-          cat > "$ANDROID_HOME/licenses/android-sdk-license" << 'EOF'
-          8933bad161af4178b1185d1a37fbf41ea5269c55
-          d56f5187479451eabf01fb78af6dfcb131a6481e
-          24333f8a63b6825ea9c5514f83c2829b004d1fee
-          EOF
-          echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-          echo "yes" > "$ANDROID_HOME/licenses/android-googletv-license"
-          echo "Licenses created"
-          # Now install platforms with auto-confirmation
-          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" 2>&1
-          echo "Installed platforms:"
-          ls -d "$ANDROID_HOME/platforms/"*/ 2>&1
+          # Download cmdline-tools
+          mkdir -p $HOME/android
+          export ANDROID_HOME=$HOME/android
+          cd /tmp
+          curl -fsSL -o cmdline.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -qq cmdline.zip -d $ANDROID_HOME/
+          mv $ANDROID_HOME/cmdline-tools $ANDROID_HOME/latest
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          mv $ANDROID_HOME/latest $ANDROID_HOME/cmdline-tools/
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
+          
+          # Accept ALL licenses
+          yes | sdkmanager --sdk_root=$ANDROID_HOME --licenses 2>&1
+          
+          # Install platforms + build-tools
+          yes | sdkmanager --sdk_root=$ANDROID_HOME "platforms;android-36" "platform-tools" 2>&1
+          
+          # Verify
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+          echo "SDK installed at $ANDROID_HOME"
+          ls -la $ANDROID_HOME/platforms/
 
       - name: Configure local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
