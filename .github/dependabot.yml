@@ -1,0 +1,55 @@
+# Dependabot — 自动依赖更新
+#
+# 每周检查 Gradle 和 GitHub Actions 依赖更新，
+# 自动创建 PR 供开发者审查。
+
+version: 2
+updates:
+  # Gradle 依赖（版本目录和构建脚本）
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "automerge"
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+    groups:
+      # 将相关依赖分组以减少 PR 数量
+      compose:
+        patterns:
+          - "androidx.compose*"
+          - "androidx.activity*"
+          - "androidx.lifecycle*"
+          - "androidx.navigation*"
+        update-types:
+          - "minor"
+          - "patch"
+      kotlin:
+        patterns:
+          - "org.jetbrains.kotlin*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore"
+      include: "scope"

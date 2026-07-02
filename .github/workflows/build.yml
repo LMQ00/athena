@@ -1,16 +1,44 @@
+# Build Debug APK — SwipeGuard
+#
+# 每次 push/PR 到 main 分支时自动构建 Debug APK，
+# 并执行代码质量检查（lint）。
+# 也可通过 workflow_dispatch 手动触发。
+
 name: Build Debug APK
 
 on:
   push:
     branches: [ "main" ]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'progress.md'
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+# 同一个分支/PR 的新 commit 会自动取消正在运行的旧 workflow
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
+env:
+  ANDROID_HOME: ${{ github.workspace }}/android-sdk
+  SDK_PLATFORM: "platforms;android-36"
+
+jobs:
+  validate:
+    name: Validate Gradle Wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Gradle Wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+  lint:
+    name: Lint Check
+    runs-on: ubuntu-latest
+    needs: validate
     steps:
       - uses: actions/checkout@v4
 
@@ -20,50 +48,91 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: ~/.gradle/caches
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
-          restore-keys: gradle-${{ runner.os }}-
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Install SDK + accept licenses
-        id: sdk-setup
+      - name: Install Android SDK ${{ env.SDK_PLATFORM }}
         run: |
-          export ANDROID_HOME=$HOME/android
-          mkdir -p $ANDROID_HOME
+          mkdir -p "$ANDROID_HOME"
           cd /tmp
           curl -sSLO https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           unzip -qq commandlinetools-linux-11076708_latest.zip
-          mkdir -p $ANDROID_HOME/cmdline-tools
-          mv cmdline-tools $ANDROID_HOME/cmdline-tools/latest
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          
-          # Accept licenses with explicit yes
-          yes | sdkmanager --sdk_root=$ANDROID_HOME --licenses 2>&1
-          if [ $? -ne 0 ]; then
-            echo "License acceptance with yes failed, trying seq approach"
-            for i in $(seq 1 100); do echo y; done | sdkmanager --sdk_root=$ANDROID_HOME --licenses 2>&1
-          fi
-          
-          # Install
-          yes | sdkmanager --sdk_root=$ANDROID_HOME "platforms;android-36" 2>&1
-          
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+
+          # 静默接受所有许可证（无交互）
+          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses > /dev/null 2>&1 || true
+          echo "y" | sdkmanager --sdk_root="$ANDROID_HOME" "$SDK_PLATFORM" > /dev/null 2>&1
+
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          echo "sdk.dir=$ANDROID_HOME" > $GITHUB_WORKSPACE/local.properties
+
+      - name: Run lint
+        id: lint-step
+        run: ./gradlew lint --no-daemon
+        continue-on-error: true
+        env:
+          KEYSTORE_DEBUG_PASSWORD: android
+
+      - name: Upload lint results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-results
+          path: |
+            app/build/reports/lint-results-*.html
+            app/build/reports/lint-results-*.xml
+          if-no-files-found: ignore
+
+      - name: Fail on lint errors
+        if: steps.lint-step.outcome != 'success'
+        run: |
+          echo "❌ Lint check failed — check lint-results artifact for details"
+          exit 1
+
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+    needs: [validate, lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Android SDK ${{ env.SDK_PLATFORM }}
+        run: |
+          mkdir -p "$ANDROID_HOME"
+          cd /tmp
+          curl -sSLO https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -qq commandlinetools-linux-11076708_latest.zip
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+
+          # 静默接受所有许可证（无交互）
+          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses > /dev/null 2>&1 || true
+          echo "y" | sdkmanager --sdk_root="$ANDROID_HOME" "$SDK_PLATFORM" > /dev/null 2>&1
+
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
 
       - name: Grant execute permission
         run: chmod +x gradlew
 
-      - name: Build (output to file)
+      - name: Build Debug APK
         id: build-step
         continue-on-error: true
         run: |
-          set +e
-          ./gradlew assembleDebug --stacktrace > build_output.txt 2>&1
-          EC=$?
-          echo "exit_code=$EC" >> $GITHUB_OUTPUT
+          ./gradlew assembleDebug --stacktrace --no-daemon > build_output.txt 2>&1
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
         env:
           KEYSTORE_DEBUG_PASSWORD: android
 
@@ -72,10 +141,12 @@ jobs:
         run: |
           if [ -f build_output.txt ]; then
             LINES=$(wc -l < build_output.txt)
-            echo "## Build Output (last 100 of $LINES lines)" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            tail -100 build_output.txt >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
+            {
+              echo "## Build Output (last 100 of $LINES lines)"
+              echo '```'
+              tail -100 build_output.txt
+              echo '```'
+            } >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Upload build log
@@ -85,14 +156,16 @@ jobs:
           name: build-log
           path: build_output.txt
           if-no-files-found: ignore
+          retention-days: 30
 
       - name: Exit with build result
         if: steps.build-step.outputs.exit_code != '0'
         run: |
-          echo "Build failed with exit code ${{ steps.build-step.outputs.exit_code }}"
+          echo "❌ Build failed with exit code ${{ steps.build-step.outputs.exit_code }}"
+          echo "   See build-log artifact for full details"
           exit ${{ steps.build-step.outputs.exit_code }}
 
-      - name: Upload APK
+      - name: Upload Debug APK
         if: steps.build-step.outputs.exit_code == '0'
         uses: actions/upload-artifact@v4
         with:

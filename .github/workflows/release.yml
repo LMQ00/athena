@@ -1,139 +1,170 @@
+# Release APK — SwipeGuard
+#
+# 当推送 tag (v*) 时自动构建签名 Release APK 并创建 GitHub Release。
+# 使用前需要先设置以下 GitHub Secrets：
+#
+# | Secret                     | 说明                        |
+# |----------------------------|-----------------------------|
+# | RELEASE_KEYSTORE_BASE64    | Release keystore 的 base64 编码 |
+# | RELEASE_KEY_ALIAS         | key 别名                     |
+# | RELEASE_KEY_PASSWORD       | key/keystore 密码            |
+# | RELEASE_STORE_PASSWORD     | keystore 密码（通常同 key）   |
+
 name: Release APK
 
 on:
   push:
     tags:
-      - 'v*'  # v1.0.0, v1.1.0, etc.
+      - 'v*'    # 匹配 v1.0.0, v1.1.0, v2.0.0-beta 等
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name for this release'
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false  # Release 不应被取消
 
 env:
-  COMPILE_SDK: 36
+  ANDROID_HOME: ${{ github.workspace }}/android-sdk
+  SDK_PLATFORM: "platforms;android-36"
 
 jobs:
-  build-release:
+  release:
+    name: Build & Release
     runs-on: ubuntu-latest
-
     steps:
-      - name: 审计 — Release 触发
+      - name: Check secrets availability
         run: |
-          echo "### 🏷️ Release 构建" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tag**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **提交**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          if [ -z "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ] || \
+             [ -z "${{ secrets.RELEASE_KEY_ALIAS }}" ] || \
+             [ -z "${{ secrets.RELEASE_KEY_PASSWORD }}" ] || \
+             [ -z "${{ secrets.RELEASE_STORE_PASSWORD }}" ]; then
+            echo "::warning::One or more release secrets are not configured."
+            echo "::warning::Set RELEASE_KEYSTORE_BASE64, RELEASE_KEY_ALIAS,"
+            echo "::warning::RELEASE_KEY_PASSWORD, and RELEASE_STORE_PASSWORD in repo secrets."
+            echo ""
+            echo "To generate a release keystore:"
+            echo "  keytool -genkey -v -keystore release.keystore -alias mykey \\"
+            echo "    -keyalg RSA -keysize 2048 -validity 10000"
+            echo "  base64 release.keystore  # paste as RELEASE_KEYSTORE_BASE64"
+          fi
 
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: 设置 JDK 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: 缓存 Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/*.gradle', '**/gradle-wrapper.properties', 'gradle.properties') }}
-          restore-keys: gradle-${{ runner.os }}-
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: 设置 Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: 创建许可 + 安装 SDK
+      - name: Install Android SDK ${{ env.SDK_PLATFORM }}
         run: |
-          mkdir -p "$ANDROID_HOME/licenses"
-          cat > "$ANDROID_HOME/licenses/android-sdk-license" << 'EOF'
-          8933bad161af4178b1185d1a37fbf41ea5269c55
-          d56f5187479451eabf01fb78af6dfcb131a6481e
-          24333f8a63b6825ea9c5514f83c2829b004d1fee
-          EOF
-          echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-${{ env.COMPILE_SDK }}" 2>&1
-          echo "✅ SDK ${{ env.COMPILE_SDK }} 就绪"
+          mkdir -p "$ANDROID_HOME"
+          cd /tmp
+          curl -sSLO https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -qq commandlinetools-linux-11076708_latest.zip
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
 
-      - name: 配置 local.properties
-        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses > /dev/null 2>&1 || true
+          echo "y" | sdkmanager --sdk_root="$ANDROID_HOME" "$SDK_PLATFORM" > /dev/null 2>&1
 
-      - name: 授权 gradlew
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+
+      - name: Decode release keystore
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+        run: |
+          KEYSTORE_DIR="${{ github.workspace }}/config/signing"
+          mkdir -p "$KEYSTORE_DIR"
+          # 从 base64 解码（GitHub 会自动 mask secret 值）
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > "$KEYSTORE_DIR/release.keystore"
+          echo "✅ Keystore decoded to $KEYSTORE_DIR/release.keystore"
+
+      - name: Grant execute permission
         run: chmod +x gradlew
 
-      - name: 构建 Release APK（含混淆）
-        run: ./gradlew assembleRelease
+      - name: Build Release APK
+        id: build-step
+        continue-on-error: true
+        run: |
+          ./gradlew assembleRelease --stacktrace --no-daemon > build_output.txt 2>&1
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
         env:
-          # Release 签名通过 GitHub Secrets 注入
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-          RELEASE_STORE_FILE: ${{ secrets.RELEASE_STORE_FILE }}
+          RELEASE_STORE_FILE: ${{ github.workspace }}/config/signing/release.keystore
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
 
-      - name: 摘要 — Release 产物
-        id: apk-info
+      - name: Show build output (last 100 lines)
+        if: always()
         run: |
-          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
-          if [ -n "$APK" ]; then
-            SIZE=$(ls -lh "$APK" | awk '{print $5}')
-            HASH=$(sha256sum "$APK" | awk '{print $1}')
-            echo "apk-path=$APK" >> $GITHUB_OUTPUT
-            echo "apk-size=$SIZE" >> $GITHUB_OUTPUT
-            echo "apk-hash=$HASH" >> $GITHUB_OUTPUT
-
-            # 获取版本号
-            VERSION=$(grep 'versionName' app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
-
+          if [ -f build_output.txt ]; then
+            LINES=$(wc -l < build_output.txt)
             {
-              echo "### 📦 Release ${{ github.ref_name }}"
-              echo ""
-              echo "| 项 | 值 |"
-              echo "|---|---|"
-              echo "| **APK** | \`SwipeGuard-${{ github.ref_name }}.apk\` |"
-              echo "| **版本** | $VERSION |"
-              echo "| **大小** | $SIZE |"
-              echo "| **SHA256** | \`$HASH\` |"
+              echo "## Build Output (last 100 of $LINES lines)"
+              echo '```'
+              tail -100 build_output.txt
+              echo '```'
             } >> $GITHUB_STEP_SUMMARY
-
-            # 检查 ProGuard 映射
-            MAPPING="app/build/outputs/mapping/release/mapping.txt"
-            if [ -f "$MAPPING" ]; then
-              MAPPING_SIZE=$(ls -lh "$MAPPING" | awk '{print $5}')
-              echo "- **ProGuard 映射**: ${MAPPING_SIZE}" >> $GITHUB_STEP_SUMMARY
-            fi
-          else
-            echo "### ❌ 构建失败" >> $GITHUB_STEP_SUMMARY
-            exit 1
           fi
 
-      - name: 上传 Release 产物
+      - name: Upload build log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SwipeGuard-release-${{ github.ref_name }}
-          path: |
-            app/build/outputs/apk/release/
-            app/build/outputs/mapping/release/mapping.txt
-          if-no-files-found: error
-          retention-days: 90
+          name: release-build-log
+          path: build_output.txt
+          if-no-files-found: ignore
 
-      - name: 创建 GitHub Release
+      - name: Exit with build result
+        if: steps.build-step.outputs.exit_code != '0'
+        run: |
+          echo "❌ Release build failed with exit code ${{ steps.build-step.outputs.exit_code }}"
+          exit ${{ steps.build-step.outputs.exit_code }}
+
+      - name: Get version from tag
+        id: get-version
+        if: steps.build-step.outputs.exit_code == '0'
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate release notes
+        id: release-notes
+        if: steps.build-step.outputs.exit_code == '0'
+        run: |
+          {
+            echo "## SwipeGuard ${{ steps.get-version.outputs.version }}"
+            echo ""
+            echo "### 变更"
+            echo "- 自动生成：请编辑此 Release 的描述"
+            echo ""
+            echo "### 安装"
+            echo "1. 下载 APK"
+            echo "2. 在 LSPosed 中激活模块"
+            echo "3. 重启 system_server"
+          } > release_notes.md
+
+      - name: Create Release
+        if: steps.build-step.outputs.exit_code == '0'
         uses: softprops/action-gh-release@v2
         with:
-          name: SwipeGuard ${{ github.ref_name }}
-          tag_name: ${{ github.ref }}
-          body: |
-            ## SwipeGuard ${{ github.ref_name }}
-
-            ColorOS 16 Athena 白名单保护模块 — 防止划卡时杀后台。
-
-            ### 安装
-            1. 确保已安装 LSPosed
-            2. 在 LSPosed 中启用模块
-            3. 勾选作用域：`System Android`（system_server）+ `com.oplus.athena`
-            4. 重启系统
-
-            ### 此版本改动
-            - 修正 Hook 策略，基于 Athena 6.0.1 真实 kill 路径逆向分析
-            - 新增三层防御：决策层 `p0.getStopTypeInner` + 执行层 `s.c`/`s.e`
-            - 修复旧版完全失效的问题
+          tag_name: ${{ steps.get-version.outputs.tag }}
+          name: SwipeGuard ${{ steps.get-version.outputs.version }}
+          body_path: release_notes.md
+          draft: true  # 标记为草稿，人工复核后再发布
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
           files: |
-            app/build/outputs/apk/release/*.apk
-            app/build/outputs/mapping/release/mapping.txt
-          fail_on_unmatched_files: false
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/apk/release/output-metadata.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
