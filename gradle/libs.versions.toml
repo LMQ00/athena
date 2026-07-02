@@ -9,7 +9,7 @@ androidx-activity-compose = "1.9.3"
 androidx-lifecycle = "2.8.7"
 androidx-navigation = "2.8.4"
 kotlinx-coroutines = "1.9.0"
-androidx-core-ktx = "1.13.1"
+androidx-core-ktx = "1.19.0"
 
 [plugins]
 agp-app = { id = "com.android.application", version.ref = "agp" }
