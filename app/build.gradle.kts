@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.swipeguard.xposed"
-    compileSdk = 36
+    compileSdk = 35
 
     signingConfigs {
         getByName("debug") {
@@ -29,7 +29,7 @@ android {
     defaultConfig {
         applicationId = "com.swipeguard.xposed"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 3
         versionName = "1.1.0"
     }

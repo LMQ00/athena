@@ -41,9 +41,12 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install SDK 36
+      - name: Accept licenses + install SDK 36
         run: |
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install 'platforms;android-36' 2>&1 || echo "SDK 36 already installed"
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 || true
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 'platforms;android-36' 2>&1 || true
+          # Verify
+          ls -d $ANDROID_HOME/platforms/*/ 2>&1 || echo "No platforms installed"
 
       - name: Configure local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
