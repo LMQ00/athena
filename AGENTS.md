@@ -7,21 +7,21 @@
 | **名称** | SwipeGuard（划卡卫士） |
 | **包名** | `com.swipeguard.xposed` |
 | **目标** | 编辑 ColorOS 16 Athena 白名单，防止划卡时被系统杀死 |
-| **核心机制** | 3 个 Xposed Hook：运行时拦截杀进程 + 配置文件 XML 注入 + Athena 自有 API 拦截 |
+| **核心机制** | 4 个 Xposed Hook：决策层拦截(`p0.getStopTypeInner`) + 执行层拦截(`s.c`/`s.e`) + API 层 + Binder 层 + 配置层注入 |
 | **根目录** | `/data/data/com.termux/files/home/athena/` |
 
 ## 技术栈
 
 | 类别 | 技术 | 版本 |
 |------|------|------|
-| **构建系统** | Gradle + AGP | Gradle 8.9 / AGP 8.7.3 |
+| **构建系统** | Gradle + AGP | Gradle 8.13 / AGP 8.13.2 |
 | **语言** | Kotlin | JVM target 17 |
 | **Android SDK** | compileSdk / targetSdk | 37 |
 | **最低支持** | minSdk | 26 (Android 8.0) |
 | **Xposed 框架** | libxposed API (现代 API) | 102.0.0 |
 | **依赖管理** | Version Catalog | `gradle/libs.versions.toml` |
 | **代码混淆** | ProGuard / R8 | 启用 (release) |
-| **UI 方案** | Jetpack Compose + Material 3 | Compose BOM 2024.10.01 |
+| **UI 方案** | Jetpack Compose + Material 3 | Compose BOM 2026.05.01 |
 | **序列化** | kotlinx.serialization | JSON |
 
 ## 项目目录结构
@@ -37,9 +37,26 @@ athena/
 ├── gradle/
 │   ├── libs.versions.toml       # 版本目录
 │   └── wrapper/
+├── config/
+│   └── signing/
+│       └── debug.keystore      # Debug 签名证书
+├── .github/
+│   └── workflows/
+│       └── build.yml           # GitHub Actions CI：每次 push 自动构建 Debug APK
+├── progress.md                 # 开发进度记录
 ├── .pi/context/
 │   ├── reverse-system-athena.md # 系统 Athena APK 逆向报告（MCP）
-│   └── plan.md                  # DAG 任务计划
+│   ├── plan.md                  # DAG 任务计划
+│   ├── review-table.md          # 版本对照审查表
+│   ├── verify-report.md         # 验证报告
+│   ├── mcp-smoke-test.json      # MCP 冒烟测试
+│   └── scout-ref/               # 子代理参考上下文
+│       ├── README.md
+│       ├── 01-mt-apk-mcp-usage.md
+│       ├── 02-libxposed-102-api.md
+│       ├── 03-github-actions-api.md
+│       ├── 04-coloros-athena-arch.md
+│       └── 05-libxposed-remote-prefs.md
 ├── app/
 │   ├── build.gradle.kts         # 应用模块 (namespace: com.swipeguard.xposed)
 │   ├── proguard-rules.pro
@@ -48,7 +65,7 @@ athena/
 │           ├── AndroidManifest.xml
 │           ├── resources/
 │           │   └── META-INF/xposed/
-│           │       ├── module.prop        # LSPosed 识别
+│           │       ├── module.prop        # LSPosed 识别（staticScope=true, autoHotReload=true）
 │           │       ├── java_init.list     # libxposed 入口声明
 │           │       └── scope.list         # Hook 作用域列表
 │           ├── res/values/strings.xml
@@ -115,23 +132,44 @@ data class SwipeGuardConfig(
 - `010` = oppo/oneplus 自有应用
 - `001` = 第三方应用
 
-### 5 个 Hook
+### 修正后的 kill 路径（2026-07-02 逆向确认）
 
-| Hook | 目标方法 | 作用 |
-|------|----------|------|
-| **WhitePkgLookupHooks** | `g2/e$d.M/N/P` 运行时 whitePkg 查询 | **决策层保护**：在 OFreezer 做 kill 决策前拦截 whitePkg 查询，使 OFreezer 认为白名单应用在 `<whitePkg>` 列表中，跳过杀进程路径 |
-| **OplusConfigHooks** | `FileInputStream` 读取 `sys_elsa_config_list.xml` + `OplusSettings.readConfig` | **配置层保护**：系统启动时劫持配置读取并注入 whitePkg 条目；同时从设备真实 XML 提取系统默认白名单并写回 SharedPreferences |
-| **SwipeKillHooks** | 7 条 kill 路径拦截 | **执行层保护**：AMS `killBackgroundProcesses` + `forceStopPackage` + Athena `r3.c.forceStopPackageAndSaveActivity` + `OplusActivityManager.forceStopPackage` + `x3.d.killProcess` + `x3.d.killProcessGroup`（cgroup 级别）+ `Process.killProcess`（PID 反查） |
-| **AthenaKillHooks** | `athenaKill` / `athenaKill2` / `athenaKill3` / `clearProcess` | 拦截 Athena 自有 API 杀进程调用 |
-| **AthenaBinderHooks** | `IAthenaService.Stub.onTransact` | Binder 入口拦截（在 `com.oplus.athena` 进程运行） |
+⚠️ **重要**：之前的逆向报告（2026-06-23）基于错误的反混淆推断，旧的 Hook 策略（SwipeKillHooks 7 路径、WhitePkgLookupHooks）在 Athena 6.0.1 中全部失效。以下为 MT MCP 逆向确认的真实路径：
+
+```
+划卡清理 (ClearSpecAppAction):
+  clearProcess(Bundle) → h1.m → n("REQUEST_CLEAR_SPEC_APP", Bundle)
+    → x3/y (ClearSpecAppAction)
+      → p0.getStopTypeInner(ProcDetailInfo, a3/a)  ← ★ 真实决策点
+        → a3/a.a() → n3/a.e(pkg, userId) 查询保护缓存
+        → 缓存来自 a3/g.j() → i3/i.b("appmanager_persist_proc_list")
+        → 不在缓存中 → 返回 2 → ForceStopStrategy.e → s.b → s.c → r3/c.h → KILL
+        → 在缓存中 → 返回 0 → SKIP ✓
+
+athenaKill/athenaKill2 (level=2):
+  → h1.i → s.b → s.c → r3/c.h → KILL (绕过 getStopType!)
+
+athenaKill3 (level=2):
+  → h1.j → s.b → s.c → r3/c.h → KILL (绕过 getStopType!)
+```
+
+### 4 个 Hook（v2 修正版）
+
+| Hook | 目标 | 作用 |
+|------|------|------|
+| **AthenaDecisionHooks** | `p0.getStopTypeInner` + `s.c` + `s.e` | **三层防御**：决策层拦截划卡清理决策，执行层拦截 force-stop 和 Process.killProcess |
+| **OplusConfigHooks** | `FileInputStream` 读取 `sys_elsa_config_list.xml` + `OplusSettings.readConfig` | **配置层保护**：OFreezer 冻结策略注入（影响冻结路径，对划卡 kill 无效） |
+| **AthenaKillHooks** | `RemoteService.athenaKill` / `athenaKill2` / `athenaKill3` / `clearProcess` | **API 层**：拦截 Athena 自有 API 杀进程调用（防御补充） |
+| **AthenaBinderHooks** (双进程) | `IAthenaService$Stub.onTransact` + `IAthenaKillerManager$Stub.onTransact` | **Binder 层**：在 Binder 分发阶段终止调用链 |
 
 ### 系统默认白名单自动提取
 
-`OplusConfigHooks.hijackStream()` 在系统启动时从设备真实 `sys_elsa_config_list.xml` 提取 `systemDefaults`，自动写回 SharedPreferences：
+`OplusConfigHooks.hijackStream()` 在系统启动时从设备真实 `sys_elsa_config_list.xml` 提取系统默认白名单，用于构建增强 XML 注入到 FileInputStream 中。提取的默认值目前用于本地注入，不写回 SharedPreferences（`systemDefaults` 使用代码中预置的 `KNOWN_SYSTEM_DEFAULTS`）：
 
 ```kotlin
 val extractedDefaults = XmlPolicyBuilder.extractWhitePkgNames(originalXml)
-persistExtractedDefaults(extractedDefaults)  // → SharedPreferences 的 KEY_CONFIG_JSON
+// 提取的默认值用于 XML 注入，不持久化到 SharedPreferences
+val effectiveSet = (extractedDefaults - cfg.userRemovals) + cfg.userAdditions
 ```
 
 确保所有 Hook 使用**设备真实的系统默认白名单**（而非硬编码的 `KNOWN_SYSTEM_DEFAULTS` 约 50 个包名），运营商定制和不同 ColorOS 版本的特殊系统应用也能被保护。
@@ -144,14 +182,13 @@ UI 进程                          system_server 进程
 SwipeGuardViewModel
   → LocalConfigRepository
   → SharedPreferences  ──Binder──→ RemoteConfigRepository
-  (JSON: SwipeGuardConfig)         → WhitePkgLookupHooks.syncConfig(repo)
-                                   → SwipeKillHooks.syncConfig(repo)
+  (JSON: SwipeGuardConfig)         → AthenaDecisionHooks.syncConfig(repo)
                                    → AthenaKillHooks.syncConfig(repo)
                                    → OplusConfigHooks.updateConfig(config)
                                    → AthenaBinderHooks.syncConfig(repo)
 ```
 
-UI 写入 SharedPreferences → Binder 回调 → `ModuleMain.syncHooks()` 分发给 5 个 Hook。
+UI 写入 SharedPreferences → Binder 回调 → `ModuleMain.syncHooks()` 分发给 4 个 Hook。
 
 ## MCP 逆向分析
 
@@ -229,7 +266,9 @@ UI 写入 SharedPreferences → Binder 回调 → `ModuleMain.syncHooks()` 分�
 - **ProGuard 规则**：`proguard-rules.pro` 已配置保留 `XposedModule` 子类入口
 - **线程安全**：`SwipeGuardConfig` 的读写热更新时整体替换引用；`OplusConfigHooks` 的 `streamStates` 使用 `WeakHashMap` + `synchronized` 块保护，合并为 `StreamState` 对象减少三次锁查询
 - **API 兼容**：libxposed API 102.0.0 与旧版 XposedBridge 不兼容，必须使用 LSPosed
-- **Hook 安装顺序**：`OplusConfigHooks` 先注入白名单 → `WhitePkgLookupHooks` 决策层拦截 → `SwipeKillHooks` / `AthenaKillHooks` 执行层拦截，形成「配置 → 决策 → 执行」三级保护
-- **Athena 混淆兼容**：所有混淆类名提供多个候选以兼容不同 Athena 版本，找不到类时仅 WARN 降级。`android.app.OplusActivityManager` 是框架 API 不随混淆变化，是最可靠的拦截点
-- **系统默认白名单持久化**：`OplusConfigHooks.hijackStream()` 提取的设备真实默认白名单自动写回 SharedPreferences，无需用户手动添加
-- **cgroup 保护**：`SwipeKillHooks` 新增 `killProcessGroup` 路径（HK03），防止内核 cgroup 级别的杀进程绕过 Java 层拦截
+- **Hook 安装顺序**：`AthenaDecisionHooks` 先装（决策+执行层）→ `OplusConfigHooks` 配置层 → `AthenaKillHooks` API 层 → `AthenaBinderHooks` Binder 层，形成「决策 → 执行 → API → Binder」四层保护
+- **真实决策点**：`p0.getStopTypeInner()` 是划卡清理的最终决策点（非 g2/e$d），返回 0=跳过、2=杀
+- **真实执行点**：`s.c()` 是 force-stop 最终执行点，`s.e()` 是 Process.killProcess 最终执行点。所有 kill 路径最终都汇聚于此
+- **AthenaKill 绕过决策层**：`athenaKill(level=2)` 直接调 `s.b()` → `s.c()`，不经过 `getStopType` 检查，必须通过执行层拦截
+- **OplusConfigHooks 无效于划卡**：`<whitePkg>` XML 注入只影响 OFreezer 冻结策略，不影响划卡 kill 路径
+- **旧 Hook 失效原因**：`SwipeKillHooks` 的 7 条路径类名/方法名在 Athena 6.0.1 中不存在；`WhitePkgLookupHooks` 的目标方法名不匹配

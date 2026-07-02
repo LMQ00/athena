@@ -8,9 +8,23 @@ on:
       - '.gitignore'
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: '构建类型'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
 
-# 同分支取消旧 run，避免浪费 runner 时间
+env:
+  # SDK 版本（Android 16 = API 36）
+  COMPILE_SDK: 36
+  # Gradle 守护进程超时
+  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -18,6 +32,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      apk-path: ${{ steps.apk-info.outputs.apk-path }}
+      apk-size: ${{ steps.apk-info.outputs.apk-size }}
+      apk-hash: ${{ steps.apk-info.outputs.apk-hash }}
 
     steps:
       - name: 审计 — workflow_dispatch 调用者
@@ -26,7 +44,7 @@ jobs:
           echo "### ⚡ 手动触发审计" >> $GITHUB_STEP_SUMMARY
           echo "- **调用者**: \`${{ github.actor }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **分支**: \`${{ github.ref }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **构建类型**: \`${{ inputs.build_type || 'debug' }}\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Checkout 代码
         uses: actions/checkout@v4
@@ -37,22 +55,28 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: 缓存 Gradle 依赖
+      - name: 缓存 Gradle
         uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/*.gradle', '**/gradle-wrapper.properties', 'gradle.properties') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
+          restore-keys: gradle-${{ runner.os }}-
 
       - name: 设置 Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: 安装 Android SDK 37
+      - name: 安装 target SDK
         run: |
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install 'platforms;android-37' 2>&1 || echo "SDK 37 already installed or not needed"
+          # 安装 target SDK 及其系统镜像
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            --install \
+            "platforms;android-${{ env.COMPILE_SDK }}" \
+            "build-tools;36.0.0" \
+            "platform-tools" \
+            2>&1
+          echo "✅ SDK ${{ env.COMPILE_SDK }} 就绪"
 
       - name: 配置 local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
@@ -60,27 +84,76 @@ jobs:
       - name: 授权 gradlew
         run: chmod +x gradlew
 
-      - name: 构建 Debug APK
-        run: ./gradlew assembleDebug
+      - name: 确定构建目标和签名
+        id: build-type
+        run: |
+          BUILD_TYPE="${{ inputs.build_type || 'debug' }}"
+          if [ "$BUILD_TYPE" = "release" ] && [ -n "${{ secrets.RELEASE_KEY_ALIAS }}" ]; then
+            echo "build-type=release" >> $GITHUB_OUTPUT
+            echo "signing=release" >> $GITHUB_OUTPUT
+            echo "using release signing" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "build-type=debug" >> $GITHUB_OUTPUT
+            echo "signing=debug" >> $GITHUB_OUTPUT
+            echo "using debug signing" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 构建 ${{ steps.build-type.outputs.build-type }} APK
+        run: ./gradlew assemble${{ steps.build-type.outputs.build-type }}
+        env:
+          KEYSTORE_DEBUG_PASSWORD: ${{ secrets.KEYSTORE_DEBUG_PASSWORD || 'android' }}
+          # Release signing 通过 GitHub Secrets 注入
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS || '' }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD || '' }}
+          RELEASE_STORE_FILE: ${{ secrets.RELEASE_STORE_FILE || '' }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD || '' }}
 
       - name: 摘要 — APK 信息
+        id: apk-info
         run: |
-          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          BUILD_TYPE="${{ steps.build-type.outputs.build-type }}"
+          APK_DIR="app/build/outputs/apk/${BUILD_TYPE}"
+          APK=$(find "$APK_DIR" -name '*.apk' | head -1)
           if [ -n "$APK" ]; then
             SIZE=$(ls -lh "$APK" | awk '{print $5}')
             HASH=$(sha256sum "$APK" | awk '{print $1}')
-            echo "### 📦 Artifact" >> $GITHUB_STEP_SUMMARY
-            echo "- **路径**: \`$APK\`" >> $GITHUB_STEP_SUMMARY
-            echo "- **大小**: $SIZE" >> $GITHUB_STEP_SUMMARY
-            echo "- **SHA256**: \`$HASH\`" >> $GITHUB_STEP_SUMMARY
+            echo "apk-path=$APK" >> $GITHUB_OUTPUT
+            echo "apk-size=$SIZE" >> $GITHUB_OUTPUT
+            echo "apk-hash=$HASH" >> $GITHUB_OUTPUT
+            {
+              echo "### 📦 构建产物"
+              echo ""
+              echo "| 项 | 值 |"
+              echo "|---|---|"
+              echo "| **类型** | $BUILD_TYPE |"
+              echo "| **路径** | \`$APK\` |"
+              echo "| **大小** | $SIZE |"
+              echo "| **SHA256** | \`$HASH\` |"
+              echo "| **版本** | ${{ env.COMPILE_SDK }} |"
+            } >> $GITHUB_STEP_SUMMARY
           else
-            echo "### ⚠️ 未找到 APK 产物" >> $GITHUB_STEP_SUMMARY
+            echo "apk-path=" >> $GITHUB_OUTPUT
+            {
+              echo "### ⚠️ 未找到 APK 产物"
+              echo ""
+              echo "构建可能失败，请检查构建日志"
+            } >> $GITHUB_STEP_SUMMARY
+            exit 1
           fi
 
-      - name: 上传 APK 产物
+      - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
-          name: athena-debug
-          path: app/build/outputs/apk/debug/
+          name: SwipeGuard-${{ steps.build-type.outputs.build-type }}-${{ github.sha }}
+          path: app/build/outputs/apk/${{ steps.build-type.outputs.build-type }}/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 90
+
+      - name: 检查 ProGuard 映射（Release 构建）
+        if: steps.build-type.outputs.build-type == 'release'
+        run: |
+          MAPPING="app/build/outputs/mapping/release/mapping.txt"
+          if [ -f "$MAPPING" ]; then
+            echo "### 🔍 ProGuard 映射" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ mapping.txt 已生成" >> $GITHUB_STEP_SUMMARY
+          fi

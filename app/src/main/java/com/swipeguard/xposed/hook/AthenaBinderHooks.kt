@@ -10,12 +10,22 @@ import io.github.libxposed.api.XposedModule
 /**
  * Athena Binder 入口拦截 Hook。
  *
- * Hook [IAthenaService.Stub.onTransact] 以在 Binder 入口处拦截划卡杀进程。
+ * 同时 Hook [IAthenaService.Stub.onTransact] 和
+ * [IAthenaKillerManager.Stub.onTransact]，在 Binder 入口处拦截划卡杀进程。
  * 相比 SwipeKillHooks 在 kill 执行器层面拦截，此 Hook 在 Binder 请求分发阶段
  * 就终止调用链，更早也更可靠。
  *
- * 此 Hook 在 `com.oplus.athena` 进程中安装（不同于 system_server 侧的 SwipeKillHooks），
- * 通过 [ModuleMain.onPackageReady] 触发。
+ * ### 安装位置
+ *
+ * 此 Hook 安装在 **两个进程** 中：
+ * - **system_server**（通过 [ModuleMain.onSystemServerStarting]）：
+ *   拦截 SystemUI/Launcher 直接发往 system_server 的 Binder 调用。
+ *   `IAthenaService` 是 ColorOS 系统服务（运行在 system_server），
+ *   `IAthenaKillerManager` 也是 system_server 中的另一条 Binder 杀路径。
+ * - **com.oplus.athena**（通过 [ModuleMain.onPackageReady]）：
+ *   拦截 Athena 进程内的内部 kill 调用。
+ *
+ * ### Binder Code 说明
  *
  * 逆向 Athena 6.0.1 确认的 Binder transact code（IAthenaService AIDL + 编译确认）：
  *
@@ -24,7 +34,7 @@ import io.github.libxposed.api.XposedModule
  * 在生成 Stub 时对显式赋值的 code 加上了 IBinder.FIRST_CALL_TRANSACTION(=1)
  * 的偏移，因此实际运行时使用的 code 比 AIDL 声明值大 1。
  *
- * 实际 Binder code（从 Smali .field 声明确认）：
+ * 实际 IAthenaService Binder code（从 Smali .field 声明确认）：
  * - 101 (0x65) = athenaKill（旧版单包杀，已废弃）
  * - 102 (0x66) = athenaFreeze（冻结）
  * - 103 (0x67) = athenaKill2（新版单包杀，6 参数）
@@ -32,9 +42,7 @@ import io.github.libxposed.api.XposedModule
  * - 224 (0xe0) = clearProcess（划卡清理入口，Bundle 含 packageName）
  *
  * 注意：OKillerBinder 实现的是 IAthenaKillerManager$Stub 而非 IAthenaService$Stub，
- * 所以 IAthenaService 的 Binder 入口拦截仅捕获从 com.oplus.athena 进程内发出的
- * 内部 kill 调用。真正的杀逻辑在 system_server 端由 RemoteService 执行，
- * 已在 AthenaKillHooks 中以方法级别 hook 覆盖。
+ * 因此两个 Stub 都需要 hook。
  */
 class AthenaBinderHooks(
     private val module: XposedModule,
@@ -53,54 +61,91 @@ class AthenaBinderHooks(
     }
 
     fun install() {
-        try {
-            // 查找 IAthenaService$Stub（Binder 服务端 Stub，处理 onTransact 分发）
-            val stubClass = try {
-                Class.forName("com.oplus.app.IAthenaService\$Stub", false, classLoader)
-            } catch (_: ClassNotFoundException) {
-                module.log(Log.WARN, tag, "IAthenaService.Stub not found, skip Binder hook")
-                null
-            }
+        var hookedCount = 0
+        val txnCodes = setOf(224, 202) // clearProcess / athenaKill3
 
-            if (stubClass != null) {
-                val onTransact = try {
-                    stubClass.getDeclaredMethod(
-                        "onTransact",
-                        Int::class.javaPrimitiveType,
-                        Parcel::class.java,
-                        Parcel::class.java,
-                        Int::class.javaPrimitiveType
-                    )
-                } catch (_: NoSuchMethodException) {
-                    module.log(Log.WARN, tag, "IAthenaService.Stub.onTransact method not found")
-                    null
-                }
+        // ── Binder 1: IAthenaService$Stub ──────────────────────────────
+        hookedCount += tryInstallStub(
+            className = "com.oplus.app.IAthenaService\$Stub",
+            stubLabel = "IAthenaService",
+            txnCodes = txnCodes
+        )
 
-                if (onTransact != null) {
-                    module.hook(onTransact)
-                        .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                        .intercept { chain ->
-                            if (!enabled) return@intercept chain.proceed()
-                            val code = chain.getArg(0) as? Int ?: return@intercept chain.proceed()
-                            // 实际 Binder code（从 Smali 确认，比 AIDL 声明大 1）：
-                            // clearProcess=0xe0(224), athenaKill3=0xca(202),
-                            // athenaKill=0x65(101), athenaKill2=0x67(103)
-                            // 101/103 由 AthenaKillHooks 在 system_server 端以方法级别 hook 拦截
-                            when (code) {
-                                224 -> handleClearProcess(chain)
-                                202 -> handleAthenaKill3(chain)
-                                else -> chain.proceed()
-                            }
-                        }
-                    module.log(Log.INFO, tag, "IAthenaService.Stub.onTransact hooked. code=224(clearProcess) 202(athenaKill3)")
-                    return
-                }
-            }
+        // ── Binder 2: IAthenaKillerManager$Stub (OKillerBinder) ────────
+        // OKillerBinder 实现的是 IAthenaKillerManager$Stub，
+        // 这是另一条 Binder 杀路径，独立于 IAthenaService。
+        hookedCount += tryInstallStub(
+            className = "com.oplus.app.IAthenaKillerManager\$Stub",
+            stubLabel = "IAthenaKillerManager",
+            txnCodes = txnCodes
+        )
 
-            module.log(Log.WARN, tag, "AthenaBinderHooks: all hooks failed to install")
-        } catch (t: Throwable) {
-            module.log(Log.ERROR, tag, "AthenaBinderHooks install failed: ${t.message}")
+        if (hookedCount > 0) {
+            module.log(
+                Log.INFO, tag,
+                "Install complete: $hookedCount Binder stub(s) hooked."
+            )
+        } else {
+            module.log(
+                Log.WARN, tag,
+                "No Binder stub classes found — all onTransact hooks failed."
+            )
         }
+    }
+
+    /**
+     * 尝试为给定的 Binder Stub 类安装 onTransact Hook。
+     *
+     * @param className Binder Stub 全限定名（如 com.oplus.app.IAthenaService$Stub）
+     * @param stubLabel 日志标签（如 IAthenaService）
+     * @param txnCodes 需要拦截的 transact code 集合
+     * @return 1 表示安装成功，0 表示失败（类/方法不存在）
+     */
+    private fun tryInstallStub(
+        className: String,
+        stubLabel: String,
+        txnCodes: Set<Int>,
+    ): Int {
+        try {
+            val stubClass = Class.forName(className, false, classLoader)
+            val onTransact = stubClass.getDeclaredMethod(
+                "onTransact",
+                Int::class.javaPrimitiveType,
+                Parcel::class.java,
+                Parcel::class.java,
+                Int::class.javaPrimitiveType
+            )
+
+            module.hook(onTransact)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    if (!enabled) return@intercept chain.proceed()
+                    val code = chain.getArg(0) as? Int ?: return@intercept chain.proceed()
+                    when (code) {
+                        224 -> handleClearProcess(chain)    // clearProcess
+                        202 -> handleAthenaKill3(chain)      // athenaKill3
+                        101, 103 -> {
+                            // athenaKill(101) / athenaKill2(103) 由
+                            // AthenaKillHooks 在 system_server 端方法级别拦截
+                            chain.proceed()
+                        }
+                        else -> chain.proceed()
+                    }
+                }
+
+            module.log(
+                Log.INFO, tag,
+                "$stubLabel.onTransact hooked. codes=$txnCodes"
+            )
+            return 1
+        } catch (_: ClassNotFoundException) {
+            module.log(Log.DEBUG, tag, "$stubLabel class not found (expected in some builds)")
+        } catch (_: NoSuchMethodException) {
+            module.log(Log.WARN, tag, "$stubLabel.onTransact method not found")
+        } catch (t: Throwable) {
+            module.log(Log.ERROR, tag, "$stubLabel install failed: ${t.message}")
+        }
+        return 0
     }
 
     /**

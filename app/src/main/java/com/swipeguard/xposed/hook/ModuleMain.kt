@@ -18,18 +18,20 @@ import io.github.libxposed.api.XposedModuleInterface.SystemServerStartingParam
  * 该类由 `META-INF/xposed/java_init.list` 声明，libxposed 框架在目标进程内
  * 自动实例化，**无需**在 AndroidManifest 中声明 `xposedmodule` meta-data。
  *
- * 核心职责（重写后去除 PolicyMatcher 依赖，直接持有 [SwipeGuardConfig]）：
+ * 核心职责（基于 Athena 6.0.1 逆向分析的实际 kill 路径）：
  *  1. 在 system_server 启动阶段（[onSystemServerStarting]）通过
  *     `XposedInterface.getRemotePreferences` 获取远端 SharedPreferences，
  *     构造 [RemoteConfigRepository] 并加载配置快照。
  *  2. 订阅配置热更新：UI 进程改写 SharedPreferences 后，重新加载配置并调用
  *     [syncHooks] 让各 Hook 同步最新快照。
- *  3. 安装 3 个相互独立的 Hook：
- *     - [OplusConfigHooks]：ColorOS OFreezer 策略注入（autostart 白名单 + elsa XML）。
- *     - [SwipeKillHooks]：拦截 `ActivityManagerService.killBackgroundProcesses`，
- *       对白名单包名跳过 kill。
- *     - [AthenaKillHooks]：拦截系统自有 API 杀进程（athenaKill/clearProcess），
- *       作为 SwipeKillHooks 的补充。
+ *  3. 安装多层独立 Hook：
+ *     - [OplusConfigHooks]：ColorOS OFreezer 策略注入（自启动白名单 + elsa XML）。
+ *     - [AthenaDecisionHooks]：三层决策+执行拦截（新架构，覆盖所有 kill 路径）。
+ *     - [AthenaKillHooks]：拦截 athenaKill/clearProcess API（防御补充）。
+ *     - [AthenaBinderHooks]：Binder 入口拦截（system_server + com.oplus.athena）。
+ *
+ * 注意：旧的 SwipeKillHooks（7 路径）和 WhitePkgLookupHooks（g2/e$d 方法）
+ * 已移除，因为这些类名/方法名在 Athena 6.0.1 中不存在。
  *
  * 容错原则：所有初始化与 Hook 安装均 try-catch 包裹，**任何失败都不允许
  * 导致 system_server 崩溃**——失败时仅记录日志并降级为「无管控」模式。
@@ -48,22 +50,24 @@ class ModuleMain : XposedModule() {
     /** 配置仓储引用，持有以维持监听器生命周期。 */
     private lateinit var configRepo: RemoteConfigRepository
 
-    /** AOSP 标准杀进程拦截 Hook。 */
-    private lateinit var swipeKillHooks: SwipeKillHooks
+    /** Athena 决策+执行层拦截（新架构，三层防御）。 */
+    private lateinit var athenaDecisionHooks: AthenaDecisionHooks
 
     /** Athena 自有 API 杀进程拦截 Hook。 */
     private lateinit var athenaKillHooks: AthenaKillHooks
 
-    /** OFreezer 运行时白名单查询拦截 Hook（决策层保护）。 */
-    private var whitePkgLookupHooks: WhitePkgLookupHooks? = null
-
     /** Athena Binder 入口拦截 Hook（在 com.oplus.athena 进程中运行）。 */
     private var athenaBinderHooks: AthenaBinderHooks? = null
+
+    /** system_server 侧 Binder 入口拦截（IAthenaService + IAthenaKillerManager）。 */
+    private var systemBinderHooks: AthenaBinderHooks? = null
 
     /** Athena 进程配置热更新监听器引用（防止 GC）。 */
     private var athenaConfigListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
+    // SwipeKillHooks removed: Athena 6.0.1 中 7 条路径的类名/方法名均不存在
+    // WhitePkgLookupHooks removed: g2/e$d 的 M/N/P 方法在 Athena 6.0.1 中不存在
 
     /**
      * system_server 启动回调 —— 模块在 system_server 进程中只触发一次。
@@ -74,7 +78,6 @@ class ModuleMain : XposedModule() {
     override fun onSystemServerStarting(param: SystemServerStartingParam) {
         try {
             // 0. 能力检查：框架必须支持 Hook system_server（PROP_CAP_SYSTEM）。
-            //    不支持时直接放弃，避免在嵌入式 / 受限框架上误注册。
             if ((getFrameworkProperties() and XposedInterface.PROP_CAP_SYSTEM) == 0L) {
                 log(Log.WARN, TAG, "Framework does not support system server hooks")
                 return
@@ -85,15 +88,13 @@ class ModuleMain : XposedModule() {
                 "onSystemServerStarting: framework=${getFrameworkName()}/${getFrameworkVersion()}"
             )
 
-            // 1. 通过 XposedInterface（本模块自身）获取远端 SharedPreferences，
-            //    构造 RemoteConfigRepository。prefsName 必须与 UI 进程的
-            //    LocalConfigRepository.PREFS_NAME 保持一致（"swipeguard_config"）。
+            // 1. 通过 XposedInterface 获取远端 SharedPreferences，
+            //    构造 RemoteConfigRepository。
             val prefs = getRemotePreferences(PREFS_NAME)
             configRepo = RemoteConfigRepository(prefs)
             config = configRepo.load()
 
-            // 2. 订阅配置热更新：UI 进程改写 SharedPreferences 后，框架在 Binder
-            //    线程回调。监听 config JSON（systemDefaults 已内嵌其中）的变更。
+            // 2. 订阅配置热更新
             prefs.registerOnSharedPreferenceChangeListener { _, key ->
                 if (key == IConfigRepository.KEY_CONFIG_JSON || key == null) {
                     try {
@@ -101,7 +102,6 @@ class ModuleMain : XposedModule() {
                         syncHooks()
                         log(Log.INFO, TAG, "Config hot-reloaded (key=$key)")
                     } catch (t: Throwable) {
-                        // reload 失败不应影响已安装的 Hook；旧快照继续生效。
                         log(Log.ERROR, TAG, "Config reload failed", t)
                     }
                 }
@@ -109,39 +109,36 @@ class ModuleMain : XposedModule() {
 
             val classLoader = param.classLoader
 
-            // 3. 安装 3 个独立 Hook，顺序固定：
-            //    OplusConfig 先注入白名单 → SwipeKill 再拦截 kill → 形成配置→拦截闭环
-            //    各 Hook 模块内部对类/方法查找失败均有容错，
-            //    不会因 ColorOS 版本差异抛出。
+            // 3. 安装多层独立 Hook，按优先级从高到低：
+            //    决策层(AthenaDecisionHooks) → Binder层 → API层 → 配置层
             var installed = 0
             var failed = 0
 
+            // 新架构：三层决策+执行拦截（覆盖划卡、athenaKill、athenaKill3 等所有路径）
+            if (tryInstall("AthenaDecisionHooks") {
+                athenaDecisionHooks = AthenaDecisionHooks(this, classLoader)
+                athenaDecisionHooks.syncConfig(configRepo)
+                athenaDecisionHooks.install()
+            }) installed++ else failed++
+
+            // OFreezer 策略注入（自启动白名单 + elsa XML 注入）
             if (tryInstall("OplusConfigHooks") {
                 OplusConfigHooks.install(this, config, classLoader, mutableListOf())
             }) installed++ else failed++
 
-            if (tryInstall("SwipeKillHooks") {
-                swipeKillHooks = SwipeKillHooks(this, classLoader)
-                swipeKillHooks.syncConfig(configRepo)
-                swipeKillHooks.install()
-            }) installed++ else failed++
-
-            // Athena 自有 API 拦截（如找到 athenaKill 则优先于此路径保护）
+            // Athena 自有 API 拦截（备份防御：athenaKill/clearProcess 方法级）
             if (tryInstall("AthenaKillHooks") {
                 athenaKillHooks = AthenaKillHooks(this, classLoader)
                 athenaKillHooks.syncConfig(configRepo)
                 athenaKillHooks.install()
             }) installed++ else failed++
 
-            // 新增：运行时 whitePkg 查询拦截（OFreezer 决策层保护）
-            if (tryInstall("WhitePkgLookupHooks") {
-                val hooks = WhitePkgLookupHooks(this, classLoader)
-                hooks.syncConfig(configRepo)
-                hooks.install()
-                whitePkgLookupHooks = hooks
+            // system_server 侧 Binder 入口拦截（IAthenaService + IAthenaKillerManager）
+            if (tryInstall("AthenaBinderHooks(system_server)") {
+                systemBinderHooks = AthenaBinderHooks(this, classLoader)
+                systemBinderHooks?.syncConfig(configRepo)
+                systemBinderHooks?.install()
             }) installed++ else failed++
-
-            // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
 
             if (failed == 0) {
                 log(
@@ -157,7 +154,6 @@ class ModuleMain : XposedModule() {
                 )
             }
         } catch (t: Throwable) {
-            // 顶层兜底：任何未预期异常都仅记录，绝不让 system_server 崩溃。
             log(Log.ERROR, TAG, "Module init failed", t)
         }
     }
@@ -165,17 +161,17 @@ class ModuleMain : XposedModule() {
     /**
      * 配置热更新时同步各 Hook 的内部快照。
      *
-     * 从 [configRepo] 加载最新配置（systemDefaults 已内嵌其中），计算有效白名单后
-     * 同步给 [OplusConfigHooks] / [SwipeKillHooks] / [AthenaKillHooks]。
+     * 从 [configRepo] 加载最新配置，同步给所有活跃 Hook。
      */
     private fun syncHooks() {
-        // OplusConfigHooks 通过 updateConfig 热更新白名单，无需重新 install
         OplusConfigHooks.updateConfig(config)
-        if (::swipeKillHooks.isInitialized) swipeKillHooks.syncConfig(configRepo)
+        if (::athenaDecisionHooks.isInitialized) athenaDecisionHooks.syncConfig(configRepo)
         if (::athenaKillHooks.isInitialized) athenaKillHooks.syncConfig(configRepo)
-        whitePkgLookupHooks?.syncConfig(configRepo)
+        systemBinderHooks?.syncConfig(configRepo)
         athenaBinderHooks?.syncConfig(configRepo)
-        // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
+        // SwipeKillHooks removed: 类名/方法名不存在于 Athena 6.0.1
+        // WhitePkgLookupHooks removed: g2/e$d.N/M/P 不存在
+        // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管
     }
 
     /**

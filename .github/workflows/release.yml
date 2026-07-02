@@ -1,0 +1,136 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'  # v1.0.0, v1.1.0, etc.
+
+env:
+  COMPILE_SDK: 36
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 审计 — Release 触发
+        run: |
+          echo "### 🏷️ Release 构建" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **提交**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 设置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: 缓存 Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/*.gradle', '**/gradle-wrapper.properties', 'gradle.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: 设置 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 target SDK
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            --install \
+            "platforms;android-${{ env.COMPILE_SDK }}" \
+            "build-tools;36.0.0" \
+            "platform-tools" \
+            2>&1
+
+      - name: 配置 local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: 授权 gradlew
+        run: chmod +x gradlew
+
+      - name: 构建 Release APK（含混淆）
+        run: ./gradlew assembleRelease
+        env:
+          # Release 签名通过 GitHub Secrets 注入
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          RELEASE_STORE_FILE: ${{ secrets.RELEASE_STORE_FILE }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+
+      - name: 摘要 — Release 产物
+        id: apk-info
+        run: |
+          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          if [ -n "$APK" ]; then
+            SIZE=$(ls -lh "$APK" | awk '{print $5}')
+            HASH=$(sha256sum "$APK" | awk '{print $1}')
+            echo "apk-path=$APK" >> $GITHUB_OUTPUT
+            echo "apk-size=$SIZE" >> $GITHUB_OUTPUT
+            echo "apk-hash=$HASH" >> $GITHUB_OUTPUT
+
+            # 获取版本号
+            VERSION=$(grep 'versionName' app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
+
+            {
+              echo "### 📦 Release ${{ github.ref_name }}"
+              echo ""
+              echo "| 项 | 值 |"
+              echo "|---|---|"
+              echo "| **APK** | \`SwipeGuard-${{ github.ref_name }}.apk\` |"
+              echo "| **版本** | $VERSION |"
+              echo "| **大小** | $SIZE |"
+              echo "| **SHA256** | \`$HASH\` |"
+            } >> $GITHUB_STEP_SUMMARY
+
+            # 检查 ProGuard 映射
+            MAPPING="app/build/outputs/mapping/release/mapping.txt"
+            if [ -f "$MAPPING" ]; then
+              MAPPING_SIZE=$(ls -lh "$MAPPING" | awk '{print $5}')
+              echo "- **ProGuard 映射**: ${MAPPING_SIZE}" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "### ❌ 构建失败" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: 上传 Release 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: SwipeGuard-release-${{ github.ref_name }}
+          path: |
+            app/build/outputs/apk/release/
+            app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SwipeGuard ${{ github.ref_name }}
+          tag_name: ${{ github.ref }}
+          body: |
+            ## SwipeGuard ${{ github.ref_name }}
+
+            ColorOS 16 Athena 白名单保护模块 — 防止划卡时杀后台。
+
+            ### 安装
+            1. 确保已安装 LSPosed
+            2. 在 LSPosed 中启用模块
+            3. 勾选作用域：`System Android`（system_server）+ `com.oplus.athena`
+            4. 重启系统
+
+            ### 此版本改动
+            - 修正 Hook 策略，基于 Athena 6.0.1 真实 kill 路径逆向分析
+            - 新增三层防御：决策层 `p0.getStopTypeInner` + 执行层 `s.c`/`s.e`
+            - 修复旧版完全失效的问题
+          files: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/mapping/release/mapping.txt
+          fail_on_unmatched_files: false

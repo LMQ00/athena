@@ -92,20 +92,45 @@ class WhitePkgLookupHooks(
      *
      * `g2/e$d` 在 Java 字节码中为 `com.oplus.athena.g2$e$d`（混淆后的
      * 内部类名）。不同 Athena 版本可能有不同混淆名，故提供多个候选。
+     *
+     * 当 ColorOS 更新时 ProGuard 混淆名会变化，下列候选覆盖常见变体：
+     * - 不同数字前缀：g1/g2/g3/h1/h2/h3
+     * - 不同内部类名：e$d / f$d / e$c / d$d
+     * - 扁平化混淆（无内部类嵌套）：G2WhitePkg 风格
+     * - 非 Athena 包路径：可能移入 android.app / oplus 包
      */
     private fun findCandidateClasses(): List<Class<*>> {
         val candidates = listOf(
-            // 来自逆向报告 v6.0.1 的确认名
+            // 逆向报告 v6.0.1 确认名
             "com.oplus.athena.g2\$e\$d",
-            "oplus.athena.g2\$e\$d",
-            // 可能的 alt 混淆名（跨版本兼容）
+            // 数字前缀变体
             "com.oplus.athena.g1\$e\$d",
             "com.oplus.athena.g2\$f\$d",
+            "com.oplus.athena.g2\$e\$c",
             "com.oplus.athena.g3\$e\$d",
+            "com.oplus.athena.g3\$f\$d",
+            "com.oplus.athena.h1\$e\$d",
             "com.oplus.athena.h2\$e\$d",
+            "com.oplus.athena.h2\$f\$d",
+            "com.oplus.athena.h3\$e\$d",
+            "com.oplus.athena.i2\$e\$d",
             // 可能无内部类嵌套（扁平化混淆）
             "com.oplus.athena.G2WhitePkg",
+            "com.oplus.athena.G3WhitePkg",
+            "com.oplus.athena.H1WhitePkg",
             "com.oplus.athena.ElsaWhitePkg",
+            "com.oplus.athena.WhitePkgChecker",
+            // 可能移入匿名内部类（$$ 命名）
+            "com.oplus.athena.g2\$\$d",
+            "com.oplus.athena.g2\$\$c",
+            // 可能移入不同包路径
+            "oplus.athena.g2\$e\$d",
+            "oplus.athena.h1\$e\$d",
+            "com.oplus.athena.elsa.ElsaWhitePkg",
+            "com.oplus.athena.config.ElsaConfig",
+            // 可能的非混淆名（ColorOS 部分内部类不混淆）
+            "com.oplus.athena.ElsaConfigManager\$WhitePkgFilter",
+            "com.oplus.athena.ElsaPolicyManager\$WhitePkgFilter",
         )
 
         val found = mutableListOf<Class<*>>()
@@ -142,12 +167,13 @@ class WhitePkgLookupHooks(
      */
     private fun hookWhitePkgMethods(clz: Class<*>): Int {
         var hooked = 0
-
-        // 优先匹配已知 ProGuard 名（来源于逆向报告）
-        val knownNames = setOf("M", "N", "P")
         val methods = clz.declaredMethods
 
-        // 第一轮：精确匹配已知名称
+        // 第一轮：精确匹配已知名称（M/N/P 来自逆向报告，
+        // 还有可能的其他名称如 a/b/c、contains/check、query 等）
+        val knownNames = setOf("M", "N", "P", "a", "b", "c",
+            "contains", "check", "query", "isWhitePkg",
+            "isProtected", "includePackage", "isInWhiteList")
         for (method in methods.filter { it.name in knownNames }) {
             if (tryHookMethod(clz, method)) hooked++
         }
