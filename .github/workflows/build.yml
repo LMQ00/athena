@@ -67,6 +67,7 @@ jobs:
 
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Run lint
         id: lint-step
@@ -123,6 +124,7 @@ jobs:
 
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Grant execute permission
         run: chmod +x gradlew
