@@ -602,10 +602,8 @@ private fun getAppLabel(context: android.content.Context, pkg: String): String {
     appLabelCache[pkg]?.let { return it }
     val label = try {
         val pm = context.packageManager
-        val appInfo = pm.getApplicationInfo(
-            pkg,
-            PackageManager.ApplicationInfoFlags.of(0)
-        )
+        @Suppress("DEPRECATION")
+        val appInfo = pm.getApplicationInfo(pkg, 0)
         pm.getApplicationLabel(appInfo).toString()
     } catch (_: Exception) {
         pkg
