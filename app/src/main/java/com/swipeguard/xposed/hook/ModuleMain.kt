@@ -211,11 +211,14 @@ class ModuleMain : XposedModule() {
                 athenaBinderHooks?.install()
 
                 // 注册配置热更新监听（Athena 进程独立 listener，跨进程需单独注册）
-                val prefs = getRemotePreferences(PREFS_NAME)
+                // 注意：复用 configRepo 持有的 prefs 实例，避免 getRemotePreferences
+                // 返回不同 Binder 代理导致 listener 永远不触发。
+                // 同时不写 config 字段——该 lateinit 仅在 system_server 进程中初始化；
+                // syncConfig(repo) 内部已自行 load()，无需外部 config 引用。
+                val prefs = configRepo.prefs
                 athenaConfigListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
                     if (key == IConfigRepository.KEY_CONFIG_JSON || key == null) {
                         try {
-                            config = configRepo.load()
                             athenaBinderHooks?.syncConfig(configRepo)
                             log(Log.INFO, TAG, "AthenaBinderHooks config hot-reloaded")
                         } catch (t: Throwable) {

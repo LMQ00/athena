@@ -32,7 +32,7 @@ import io.github.libxposed.service.XposedService
  *   （如服务已死）会抛出 [XposedService.ServiceException]，由上层决定降级策略。
  */
 class RemoteConfigRepository(
-    private val prefs: SharedPreferences,
+    val prefs: SharedPreferences,
 ) : IConfigRepository {
 
     /**

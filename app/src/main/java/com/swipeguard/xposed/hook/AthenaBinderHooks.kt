@@ -75,7 +75,7 @@ class AthenaBinderHooks(
         // OKillerBinder 实现的是 IAthenaKillerManager$Stub，
         // 这是另一条 Binder 杀路径，独立于 IAthenaService。
         hookedCount += tryInstallStub(
-            className = "com.oplus.app.IAthenaKillerManager\$Stub",
+            className = "com.oplus.athena.interaction.IAthenaKillerManager\$Stub",
             stubLabel = "IAthenaKillerManager",
             txnCodes = txnCodes
         )
