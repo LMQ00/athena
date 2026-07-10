@@ -7,7 +7,8 @@ plugins {
 
 android {
     namespace = "com.swipeguard.xposed"
-    compileSdk = 36
+    compileSdk = 37
+
 
     signingConfigs {
         getByName("debug") {

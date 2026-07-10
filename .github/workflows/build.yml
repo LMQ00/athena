@@ -24,7 +24,7 @@ concurrency:
 
 env:
   ANDROID_HOME: ${{ github.workspace }}/android-sdk
-  SDK_PLATFORM: "platforms;android-36"
+  SDK_PLATFORM: "platforms;android-37"
 
 jobs:
   validate:
