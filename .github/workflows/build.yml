@@ -24,7 +24,7 @@ concurrency:
 
 env:
   ANDROID_HOME: ${{ github.workspace }}/android-sdk
-  SDK_PLATFORM: "platforms;android-37"
+  SDK_PLATFORM: "platforms;android-CinnamonBun"
 
 jobs:
   validate:
@@ -53,11 +53,19 @@ jobs:
 
       - name: Install Android SDK ${{ env.SDK_PLATFORM }}
         run: |
-          mkdir -p "$ANDROID_HOME/licenses"
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
-          echo "84831b9409646a918e30573bab4c9c91346d8abd" >> "$ANDROID_HOME/licenses/android-sdk-license"
+          mkdir -p "$ANDROID_HOME"
+          cd /tmp
+          curl -sSLO https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -qq commandlinetools-linux-11076708_latest.zip
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+
+          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses --channel=3 || true
+          sdkmanager --sdk_root="$ANDROID_HOME" --channel=3 "$SDK_PLATFORM"
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Run lint
@@ -101,11 +109,19 @@ jobs:
 
       - name: Install Android SDK ${{ env.SDK_PLATFORM }}
         run: |
-          mkdir -p "$ANDROID_HOME/licenses"
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
-          echo "84831b9409646a918e30573bab4c9c91346d8abd" >> "$ANDROID_HOME/licenses/android-sdk-license"
+          mkdir -p "$ANDROID_HOME"
+          cd /tmp
+          curl -sSLO https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -qq commandlinetools-linux-11076708_latest.zip
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+
+          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses --channel=3 || true
+          sdkmanager --sdk_root="$ANDROID_HOME" --channel=3 "$SDK_PLATFORM"
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Grant execute permission

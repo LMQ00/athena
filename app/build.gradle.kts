@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.swipeguard.xposed"
-    compileSdk = 37
+    compileSdkPreview = "CinnamonBun"
 
 
     signingConfigs {
