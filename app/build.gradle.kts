@@ -61,6 +61,10 @@ android {
             merges += "META-INF/xposed/*"
         }
     }
+
+    lint {
+        disable += "Instantiatable"
+    }
 }
 
 dependencies {
