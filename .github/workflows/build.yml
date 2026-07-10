@@ -62,8 +62,8 @@ jobs:
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
 
           # 静默接受所有许可证（无交互）
-          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses || true
-          sdkmanager --sdk_root="$ANDROID_HOME" "$SDK_PLATFORM"
+          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses --channel=canary || true
+          sdkmanager --sdk_root="$ANDROID_HOME" --channel=canary "$SDK_PLATFORM"
 
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
@@ -120,8 +120,8 @@ jobs:
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
 
           # 静默接受所有许可证（无交互）
-          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses || true
-          sdkmanager --sdk_root="$ANDROID_HOME" "$SDK_PLATFORM"
+          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses --channel=canary || true
+          sdkmanager --sdk_root="$ANDROID_HOME" --channel=canary "$SDK_PLATFORM"
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
