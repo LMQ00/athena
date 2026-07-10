@@ -399,8 +399,8 @@ private fun AddAppBottomSheet(
     LaunchedEffect(showSystemApps, currentPackages.size) {
         isLoading = true
         val apps = withContext(Dispatchers.IO) {
-            context.packageManager.getInstalledApplications(
-                PackageManager.ApplicationInfoFlags.of(0))
+            @Suppress("DEPRECATION")
+            context.packageManager.getInstalledApplications(0)
                 .filter {
                     if (showSystemApps) true
                     else (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0
