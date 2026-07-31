@@ -9,7 +9,6 @@ import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
-import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import io.github.libxposed.api.XposedModuleInterface.SystemServerStartingParam
 
 /**
@@ -56,14 +55,15 @@ class ModuleMain : XposedModule() {
     /** Athena 自有 API 杀进程拦截 Hook。 */
     private lateinit var athenaKillHooks: AthenaKillHooks
 
-    /** Athena Binder 入口拦截 Hook（在 com.oplus.athena 进程中运行）。 */
-    private var athenaBinderHooks: AthenaBinderHooks? = null
-
-    /** system_server 侧 Binder 入口拦截（IAthenaService + IAthenaKillerManager）。 */
+    /** system_server 侧 Binder 入口拦截（IAthenaService）。
+     *
+     * 注：com.oplus.athena 进程不再安装 Binder Hook——MT MCP 逆向（2026-07-31, D3）
+     * 证实该进程的 OKillerBinder（IAthenaKillerManager$Stub）是纯查询接口
+     * （getWhiteList/getActiveAppList 等，code≤0x11），无任何 kill/freeze/clear
+     * 能力；真实 kill 服务是 system_server 中以 "athenaservice" 注册的
+     * RemoteService（IAthenaService$Stub），由本字段在 system_server 拦截。
+     */
     private var systemBinderHooks: AthenaBinderHooks? = null
-
-    /** Athena 进程配置热更新监听器引用（防止 GC）。 */
-    private var athenaConfigListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
     // SwipeKillHooks removed: Athena 6.0.1 中 7 条路径的类名/方法名均不存在
@@ -168,7 +168,8 @@ class ModuleMain : XposedModule() {
         if (::athenaDecisionHooks.isInitialized) athenaDecisionHooks.syncConfig(configRepo)
         if (::athenaKillHooks.isInitialized) athenaKillHooks.syncConfig(configRepo)
         systemBinderHooks?.syncConfig(configRepo)
-        athenaBinderHooks?.syncConfig(configRepo)
+        // athenaBinderHooks 已移除：com.oplus.athena 进程的 OKillerBinder 是纯查询接口，
+        // 无 kill 能力（D3）；真实 Binder kill 服务在 system_server（"athenaservice"）。
         // SwipeKillHooks removed: 类名/方法名不存在于 Athena 6.0.1
         // WhitePkgLookupHooks removed: g2/e$d.N/M/P 不存在
         // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管
@@ -185,53 +186,11 @@ class ModuleMain : XposedModule() {
         )
     }
 
-    /** 应用包加载回调。记录包加载事件；Hook 安装移至 [onPackageReady]。 */
+    /** 应用包加载回调。记录包加载事件；Athena 进程无需安装 Hook（D3）。 */
     override fun onPackageLoaded(param: PackageLoadedParam) {
-        // 仅记录日志；实际安装延后到 onPackageReady（ClassLoader 就绪后）
+        // 仅记录日志；Athena 进程的 OKillerBinder 是纯查询接口（D3），无需 Hook。
         if (param.packageName == "com.oplus.athena") {
-            log(Log.DEBUG, TAG, "onPackageLoaded: com.oplus.athena — deferring to onPackageReady")
-        }
-    }
-
-    /**
-     * 应用 ClassLoader 就绪回调。
-     * 当目标包为 com.oplus.athena 时，安装 Binder 入口拦截 Hook。
-     * [PackageReadyParam.classLoader] 在此阶段可用。
-     */
-    override fun onPackageReady(param: PackageReadyParam) {
-        if (param.packageName == "com.oplus.athena") {
-            try {
-                // 在 Athena 进程中获取配置（若尚未初始化）
-                if (!::configRepo.isInitialized) {
-                    val prefs = getRemotePreferences(PREFS_NAME)
-                    configRepo = RemoteConfigRepository(prefs)
-                }
-                athenaBinderHooks = AthenaBinderHooks(this, param.classLoader)
-                athenaBinderHooks?.syncConfig(configRepo)
-                athenaBinderHooks?.install()
-
-                // 注册配置热更新监听（Athena 进程独立 listener，跨进程需单独注册）
-                // 注意：复用 configRepo 持有的 prefs 实例，避免 getRemotePreferences
-                // 返回不同 Binder 代理导致 listener 永远不触发。
-                // 同时不写 config 字段——该 lateinit 仅在 system_server 进程中初始化；
-                // syncConfig(repo) 内部已自行 load()，无需外部 config 引用。
-                val prefs = configRepo.prefs
-                athenaConfigListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-                    if (key == IConfigRepository.KEY_CONFIG_JSON || key == null) {
-                        try {
-                            athenaBinderHooks?.syncConfig(configRepo)
-                            log(Log.INFO, TAG, "AthenaBinderHooks config hot-reloaded")
-                        } catch (t: Throwable) {
-                            log(Log.ERROR, TAG, "AthenaBinderHooks reload failed", t)
-                        }
-                    }
-                }
-                prefs.registerOnSharedPreferenceChangeListener(athenaConfigListener)
-
-                log(Log.INFO, TAG, "AthenaBinderHooks installed for com.oplus.athena")
-            } catch (t: Throwable) {
-                log(Log.ERROR, TAG, "AthenaBinderHooks install failed", t)
-            }
+            log(Log.DEBUG, TAG, "onPackageLoaded: com.oplus.athena — no hooks needed (D3)")
         }
     }
 

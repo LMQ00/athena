@@ -58,7 +58,10 @@ class AthenaKillHooks(private val module: XposedModule,
         )
         for (clsName in candidates) {
             try {
-                val clz = Class.forName(clsName, false, classLoader)
+                val clz = ClassFinders.findClass(clsName, classLoader) ?: run {
+                    module.log(Log.WARN, tag, "Class $clsName not found for $methodName, trying next")
+                    continue
+                }
                 var hooked = false
                 for (m in clz.declaredMethods) {
                     if (m.name != methodName) continue

@@ -65,18 +65,17 @@ class AthenaBinderHooks(
         val txnCodes = setOf(224, 202) // clearProcess / athenaKill3
 
         // ── Binder 1: IAthenaService$Stub ──────────────────────────────
+        // MT MCP 逆向确认（2026-07-31，D3）：code 映射准确
+        // 101=athenaKill / 102=athenaFreeze / 103=athenaKill2 / 202=athenaKill3 / 224=clearProcess
+        // （ColorOS AIDL 编译器对显式赋值 code 加 IBinder.FIRST_CALL_TRANSACTION 偏移）
+        //
+        // 注意：IAthenaKillerManager（com.oplus.athena.interaction 包）是纯查询接口，
+        // 仅 getWhiteList/getActiveAppList 等查询方法，TRANSACTION code 最大 0x11，
+        // **不存在** 224/202/103/102 类 kill code；OKillerBinder 继承它且 onBind 一律返回，
+        // 无任何清理能力——因此该 Stub 分支已移除，拦截无意义（旧代码曾 hook 它）。
         hookedCount += tryInstallStub(
             className = "com.oplus.app.IAthenaService\$Stub",
             stubLabel = "IAthenaService",
-            txnCodes = txnCodes
-        )
-
-        // ── Binder 2: IAthenaKillerManager$Stub (OKillerBinder) ────────
-        // OKillerBinder 实现的是 IAthenaKillerManager$Stub，
-        // 这是另一条 Binder 杀路径，独立于 IAthenaService。
-        hookedCount += tryInstallStub(
-            className = "com.oplus.athena.interaction.IAthenaKillerManager\$Stub",
-            stubLabel = "IAthenaKillerManager",
             txnCodes = txnCodes
         )
 
@@ -107,7 +106,11 @@ class AthenaBinderHooks(
         txnCodes: Set<Int>,
     ): Int {
         try {
-            val stubClass = Class.forName(className, false, classLoader)
+            val stubClass = ClassFinders.findClass(className, classLoader)
+                ?: run {
+                    module.log(Log.DEBUG, tag, "$stubLabel class not found (expected in some builds)")
+                    return 0
+                }
             val onTransact = stubClass.getDeclaredMethod(
                 "onTransact",
                 Int::class.javaPrimitiveType,
