@@ -1,39 +1,66 @@
 package com.swipeguard.xposed.ui.screens
 
 import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.ShieldOutlined
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.swipeguard.xposed.ui.data.SwipeGuardViewModel
@@ -42,13 +69,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * SwipeGuard 主界面 —— LSPosed 风格重构。
+ * SwipeGuard 主界面 —— 分组式 Material 3 设计。
  *
- * 顶栏：应用名 + 已保护计数 + Switch 开关
- * 主体：LSPosed 风格列表卡片（48dp 图标 + 应用名 + 包名 + 标签 + 滑动删除）
- * 底部弹出式添加搜索（ModalBottomSheet）
+ * 顶栏：应用名 + 保护状态摘要 + 总开关
+ * 主体：按「我的添加 / 系统默认」分组展示，每组带小标题与计数
+ * 添加：ModalBottomSheet 多选搜索（非旧版 AlertDialog）
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SwipeGuardScreen() {
     val uiState by SwipeGuardViewModel.state.collectAsStateWithLifecycle()
@@ -57,29 +84,43 @@ fun SwipeGuardScreen() {
     var showAddSheet by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf<String?>(null) }
 
-    val effectiveApps = uiState.effectiveProtectedApps
-    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val config = uiState.config
+    val effectiveApps = config.effectiveProtectedApps
+    val userAdded = effectiveApps.filter { it in config.userAdditions }.sorted()
+    val systemDefaults = effectiveApps.filter { it !in config.userAdditions }.sorted()
 
     Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             TopAppBar(
                 title = {
                     Column {
                         Text("SwipeGuard", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "已保护 ${effectiveApps.size} 个应用",
+                            if (config.enabled) "已保护 ${effectiveApps.size} 个应用"
+                            else "已暂停保护",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (config.enabled) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            }
                         )
                     }
                 },
                 actions = {
-                    Switch(
-                        checked = uiState.config.enabled,
-                        onCheckedChange = { SwipeGuardViewModel.toggleEnabled() }
-                    )
-                    Spacer(Modifier.width(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (config.enabled) "保护中" else "已关闭",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Switch(
+                            checked = config.enabled,
+                            onCheckedChange = { SwipeGuardViewModel.toggleEnabled() }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
@@ -90,7 +131,8 @@ fun SwipeGuardScreen() {
             FloatingActionButton(
                 onClick = { showAddSheet = true },
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                shape = CircleShape
             ) {
                 Icon(Icons.Filled.Add, contentDescription = "添加应用")
             }
@@ -102,77 +144,52 @@ fun SwipeGuardScreen() {
                 .padding(padding)
         ) {
             if (effectiveApps.isEmpty()) {
-                // 空状态
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Filled.Lock,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            "暂无受保护应用",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "添加应用后可防止划卡时被系统杀死",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        )
-                    }
-                }
+                EmptyState()
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
                         start = 16.dp, end = 16.dp,
                         top = 8.dp, bottom = 88.dp
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    )
                 ) {
-                    items(effectiveApps.sorted(), key = { it }) { pkg ->
-                        SwipeToDismissBox(
-                            state = rememberSwipeToDismissBoxState(
-                                confirmValueChange = { value ->
-                                    if (value == SwipeToDismissBoxValue.EndToStart) {
-                                        showDeleteConfirm = pkg
-                                        false // 不实际关闭，由删除确认弹窗决定
-                                    } else false
-                                }
-                            ),
-                            backgroundContent = {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(MaterialTheme.colorScheme.errorContainer),
-                                    contentAlignment = Alignment.CenterEnd
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Delete,
-                                        contentDescription = "删除",
-                                        tint = MaterialTheme.colorScheme.onErrorContainer,
-                                        modifier = Modifier.padding(end = 20.dp)
-                                    )
-                                }
-                            },
-                            enableDismissFromStartToEnd = false,
-                            gesturesEnabled = true,
-                            modifier = Modifier.animateItem()
-                        ) {
+                    // ── 我的添加 ──
+                    if (userAdded.isNotEmpty()) {
+                        item(key = "header-user") {
+                            SectionHeader(
+                                title = "我的添加",
+                                count = userAdded.size,
+                                accent = true
+                            )
+                        }
+                        items(userAdded, key = { "user-$it" }) { pkg ->
                             AppItemCard(
                                 pkg = pkg,
-                                isSystemDefault = pkg in uiState.config.systemDefaults,
-                                isUserAdded = pkg in uiState.config.userAdditions,
+                                isSystemDefault = false,
+                                isUserAdded = true,
                                 onDeleteClick = { showDeleteConfirm = pkg }
                             )
+                            Spacer(Modifier.height(6.dp))
+                        }
+                    }
+
+                    // ── 系统默认 ──
+                    if (systemDefaults.isNotEmpty()) {
+                        item(key = "header-sys") {
+                            SectionHeader(
+                                title = "系统默认",
+                                count = systemDefaults.size,
+                                accent = false
+                            )
+                        }
+                        items(systemDefaults, key = { "sys-$it" }) { pkg ->
+                            AppItemCard(
+                                pkg = pkg,
+                                isSystemDefault = true,
+                                isUserAdded = false,
+                                onDeleteClick = { showDeleteConfirm = pkg }
+                            )
+                            Spacer(Modifier.height(6.dp))
                         }
                     }
                 }
@@ -194,7 +211,7 @@ fun SwipeGuardScreen() {
     // 删除确认
     showDeleteConfirm?.let { pkg ->
         val appLabel = getAppLabel(context, pkg)
-        val isSystemDefault = pkg in uiState.config.systemDefaults
+        val isSystemDefault = pkg in config.systemDefaults
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = null },
             icon = {
@@ -230,7 +247,50 @@ fun SwipeGuardScreen() {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// LSPosed 风格的应用卡片
+// 分组小标题
+// ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SectionHeader(title: String, count: Int, accent: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = if (accent) Icons.Filled.Shield else Icons.Filled.ShieldOutlined,
+            contentDescription = null,
+            tint = if (accent) MaterialTheme.colorScheme.primary
+                   else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.width(8.dp))
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = if (accent) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceVariant
+        ) {
+            Text(
+                text = "$count",
+                modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (accent) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 应用卡片
 // ─────────────────────────────────────────────────────────────────
 
 @Composable
@@ -243,24 +303,23 @@ private fun AppItemCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onDeleteClick),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 0.5.dp
+        tonalElevation = 1.dp,
+        shadowElevation = 0.5.dp
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // LSPosed 风格：48dp 大圆角图标
-            AppIcon(pkg = pkg, size = 48)
+            AppIcon(pkg = pkg, size = 44)
 
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(14.dp))
 
-            // 应用信息
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = getAppLabel(LocalContext.current, pkg),
@@ -277,35 +336,16 @@ private fun AppItemCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                // 标签行
                 if (isSystemDefault || isUserAdded) {
                     Spacer(Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (isSystemDefault) {
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant
-                            ) {
-                                Text(
-                                    "系统",
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            Tag(text = "系统", container = MaterialTheme.colorScheme.surfaceVariant,
+                                content = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (isUserAdded) {
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = MaterialTheme.colorScheme.tertiaryContainer
-                            ) {
-                                Text(
-                                    "添加",
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                                )
-                            }
+                            Tag(text = "添加", container = MaterialTheme.colorScheme.primaryContainer,
+                                content = MaterialTheme.colorScheme.onPrimaryContainer)
                         }
                     }
                 }
@@ -313,7 +353,6 @@ private fun AppItemCard(
 
             Spacer(Modifier.width(8.dp))
 
-            // 右侧删除指示
             Icon(
                 Icons.Filled.Delete,
                 contentDescription = "移除",
@@ -324,8 +363,20 @@ private fun AppItemCard(
     }
 }
 
+@Composable
+private fun Tag(text: String, container: Color, content: Color) {
+    Surface(shape = RoundedCornerShape(5.dp), color = container) {
+        Text(
+            text,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = content
+        )
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────
-// 应用图标组件
+// 应用图标
 // ─────────────────────────────────────────────────────────────────
 
 @Composable
@@ -355,15 +406,14 @@ private fun AppIcon(pkg: String, size: Int) {
             },
             modifier = Modifier
                 .size(size.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(11.dp))
         )
     } else {
-        // 回退：显示首字母
         val label = getAppLabel(context, pkg)
         Box(
             modifier = Modifier
                 .size(size.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(11.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
@@ -377,9 +427,48 @@ private fun AppIcon(pkg: String, size: Int) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// 添加应用 BottomSheet
+// 空状态
 // ─────────────────────────────────────────────────────────────────
 
+@Composable
+private fun EmptyState() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .size(88.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Filled.Lock,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "暂无受保护应用",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "点击右下角 + 添加应用，防止划卡时被系统杀死",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 添加应用 ModalBottomSheet
+// ─────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddAppBottomSheet(
     currentPackages: Set<String>,
@@ -387,12 +476,11 @@ private fun AddAppBottomSheet(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var searchQuery by remember { mutableStateOf("") }
     var showSystemApps by remember { mutableStateOf(false) }
     var selectedPackages by remember { mutableStateOf<Set<String>>(emptySet()) }
 
-    // 异步加载应用列表
     var installedApps by remember { mutableStateOf<List<ApplicationInfo>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
 
@@ -421,9 +509,28 @@ private fun AddAppBottomSheet(
         }
     }
 
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = {
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = {
+            Surface(
+                modifier = Modifier
+                    .padding(top = 10.dp, bottom = 4.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+            ) {}
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 640.dp)
+                .padding(horizontal = 16.dp)
+                .navigationBarsPadding()
+        ) {
+            // 标题
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Filled.Search,
@@ -432,164 +539,170 @@ private fun AddAppBottomSheet(
                     modifier = Modifier.size(22.dp)
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("添加保护应用", fontWeight = FontWeight.SemiBold)
+                Text("添加保护应用", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             }
-        },
-        text = {
-            Column(modifier = Modifier.heightIn(max = 500.dp)) {
-                // 搜索框
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("搜索应用名称或包名") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
 
-                Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
 
-                // 显示系统应用
+            // 搜索框
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("搜索应用名称或包名") },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            )
+
+            Spacer(Modifier.height(6.dp))
+
+            // 显示系统应用 + 已选计数（一行）
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
                         .clickable { showSystemApps = !showSystemApps }
+                        .padding(vertical = 4.dp)
                 ) {
                     Checkbox(
                         checked = showSystemApps,
                         onCheckedChange = { showSystemApps = it }
                     )
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(2.dp))
                     Text("显示系统应用", style = MaterialTheme.typography.bodyMedium)
                 }
-
-                Spacer(Modifier.height(4.dp))
-
-                // 已选计数
                 if (selectedPackages.isNotEmpty()) {
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.fillMaxWidth()
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer
                     ) {
                         Row(
-                            modifier = Modifier.padding(8.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 Icons.Filled.Check,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(5.dp))
                             Text(
-                                "已选 ${selectedPackages.size} 个应用",
-                                style = MaterialTheme.typography.bodyMedium,
+                                "已选 ${selectedPackages.size}",
+                                style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
                 }
+            }
 
-                // 应用列表
-                if (isLoading) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Spacer(Modifier.height(4.dp))
+
+            if (isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(28.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                }
+            } else if (filteredApps.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(28.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        if (searchQuery.isNotBlank()) "未找到匹配的应用"
+                        else "没有可添加的应用",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                    items(filteredApps, key = { it.packageName }) { app ->
+                        val pkg = app.packageName
+                        val label = getAppLabel(context, pkg)
+                        val isSelected = pkg in selectedPackages
+
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    selectedPackages =
+                                        if (pkg in selectedPackages) selectedPackages - pkg
+                                        else selectedPackages + pkg
+                                },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                            } else Color.Transparent
                         ) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            Text("加载中…", style = MaterialTheme.typography.bodyMedium)
-                        }
-                    }
-                } else if (filteredApps.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            if (searchQuery.isNotBlank()) "未找到匹配的应用"
-                            else "没有可添加的应用",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                } else {
-                    LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                        items(filteredApps, key = { it.packageName }) { app ->
-                            val pkg = app.packageName
-                            val label = getAppLabel(context, pkg)
-                            val isSelected = pkg in selectedPackages
-
-                            Surface(
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable {
-                                        selectedPackages = if (pkg in selectedPackages) selectedPackages - pkg else selectedPackages + pkg
-                                    },
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                        else Color.Transparent
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    AppIcon(pkg = pkg, size = 32)
-
-                                    Spacer(Modifier.width(12.dp))
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = label,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Medium,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = pkg,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-
-                                    Checkbox(
-                                        checked = isSelected,
-                                        onCheckedChange = null
+                                AppIcon(pkg = pkg, size = 32)
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = pkg,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
+                                Checkbox(checked = isSelected, onCheckedChange = null)
                             }
                         }
                     }
+                    item {
+                        Spacer(Modifier.height(8.dp))
+                    }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onAdd(selectedPackages); onDismiss() },
-                enabled = selectedPackages.isNotEmpty()
-            ) { Text("确认添加") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+
+            // 底部操作栏
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onDismiss) { Text("取消") }
+                Spacer(Modifier.width(8.dp))
+                TextButton(
+                    onClick = { onAdd(selectedPackages); onDismiss() },
+                    enabled = selectedPackages.isNotEmpty()
+                ) {
+                    Text("确认添加 (${selectedPackages.size})")
+                }
+            }
         }
-    )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────

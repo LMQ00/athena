@@ -65,7 +65,7 @@ class ModuleMain : XposedModule() {
      */
     private var systemBinderHooks: AthenaBinderHooks? = null
 
-    // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管，参见 .pi/context/plan.md t7
+    // SystemServiceHooks removed: 冻结已由第三方墓碑模块接管
     // SwipeKillHooks removed: Athena 6.0.1 中 7 条路径的类名/方法名均不存在
     // WhitePkgLookupHooks removed: g2/e$d 的 M/N/P 方法在 Athena 6.0.1 中不存在
 
