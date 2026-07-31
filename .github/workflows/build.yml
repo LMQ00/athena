@@ -28,7 +28,8 @@ env:
   # compileSdkMinor=0 → AGP 用 platforms/android-37.0。直接下载 zip 解压，
   # 避免 sdkmanager 包名（裸 android-37 / CinnamonBun 均不可用）与许可证交互问题。
   SDK_PLATFORM_ZIP: "https://dl.google.com/android/repository/platform-37.0_r02.zip"
-  # build-tools 36/37 都装（AGP 8.13 默认 36.x；compileSdk 37 可匹配 37.0.0）。
+  # AGP 8.13 默认 build-tools 35.0.0；另装 36/37 供匹配。
+  BUILD_TOOLS_35: "https://dl.google.com/android/repository/build-tools_r35_linux.zip"
   BUILD_TOOLS_36: "https://dl.google.com/android/repository/build-tools_r36_linux.zip"
   BUILD_TOOLS_37: "https://dl.google.com/android/repository/build-tools_r37_linux.zip"
 
@@ -59,9 +60,14 @@ jobs:
 
       - name: Install Android SDK 37.0
         run: |
-          mkdir -p "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
+          mkdir -p "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" "$ANDROID_HOME/licenses"
+          # 预写 license 哈希（zip 解压不含 license 文件，AGP 会拒绝）
+          printf '24333f8a63b6825ea9c5514f83c2829b004d1fee\n' > "$ANDROID_HOME/licenses/android-sdk-license"
+          printf '84831b9409646a918e30573bab4c9c91346d8abd\n' > "$ANDROID_HOME/licenses/android-sdk-preview-license"
           curl -sSLO "$SDK_PLATFORM_ZIP"
           unzip -qq platform-37.0_r02.zip -d "$ANDROID_HOME/platforms"
+          curl -sSLO "$BUILD_TOOLS_35"
+          unzip -qq build-tools_r35_linux.zip -d "$ANDROID_HOME/build-tools/35.0.0"
           curl -sSLO "$BUILD_TOOLS_36"
           unzip -qq build-tools_r36_linux.zip -d "$ANDROID_HOME/build-tools/36.0.0"
           curl -sSLO "$BUILD_TOOLS_37"
@@ -112,9 +118,14 @@ jobs:
 
       - name: Install Android SDK 37.0
         run: |
-          mkdir -p "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
+          mkdir -p "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" "$ANDROID_HOME/licenses"
+          # 预写 license 哈希（zip 解压不含 license 文件，AGP 会拒绝）
+          printf '24333f8a63b6825ea9c5514f83c2829b004d1fee\n' > "$ANDROID_HOME/licenses/android-sdk-license"
+          printf '84831b9409646a918e30573bab4c9c91346d8abd\n' > "$ANDROID_HOME/licenses/android-sdk-preview-license"
           curl -sSLO "$SDK_PLATFORM_ZIP"
           unzip -qq platform-37.0_r02.zip -d "$ANDROID_HOME/platforms"
+          curl -sSLO "$BUILD_TOOLS_35"
+          unzip -qq build-tools_r35_linux.zip -d "$ANDROID_HOME/build-tools/35.0.0"
           curl -sSLO "$BUILD_TOOLS_36"
           unzip -qq build-tools_r36_linux.zip -d "$ANDROID_HOME/build-tools/36.0.0"
           curl -sSLO "$BUILD_TOOLS_37"
