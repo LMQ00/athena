@@ -39,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate Gradle Wrapper
-        uses: gradle/actions/wrapper-validation@v4
+        uses: gradle/actions/wrapper-validation@v6
 
   lint:
     name: Lint Check
@@ -55,7 +55,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Install Android SDK 37.0
         run: |
@@ -108,7 +108,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Install Android SDK 37.0
         run: |
