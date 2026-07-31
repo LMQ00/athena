@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.ShieldOutlined
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -259,7 +258,7 @@ private fun SectionHeader(title: String, count: Int, accent: Boolean) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            imageVector = if (accent) Icons.Filled.Shield else Icons.Filled.ShieldOutlined,
+            imageVector = Icons.Filled.Shield,
             contentDescription = null,
             tint = if (accent) MaterialTheme.colorScheme.primary
                    else MaterialTheme.colorScheme.onSurfaceVariant,
