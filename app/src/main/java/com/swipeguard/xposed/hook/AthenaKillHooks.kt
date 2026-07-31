@@ -57,33 +57,28 @@ class AthenaKillHooks(private val module: XposedModule,
             "com.oplus.athena.systemservice.KillManagerService",
         )
         for (clsName in candidates) {
-            try {
-                val clz = ClassFinders.findClass(clsName, classLoader) ?: run {
-                    module.log(Log.WARN, tag, "Class $clsName not found for $methodName, trying next")
-                    continue
-                }
-                var hooked = false
-                for (m in clz.declaredMethods) {
-                    if (m.name != methodName) continue
-                    module.hook(m)
-                        .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                        .intercept { chain ->
-                            if (shouldBlock(m, chain)) {
-                                module.log(Log.INFO, tag, "Blocked $methodName")
-                                return@intercept 0
-                            }
-                            chain.proceed()
-                        }
-                    hooked = true
-                }
-                if (hooked) {
-                    module.log(Log.INFO, tag, "Hooked $clsName.$methodName")
-                    return
-                }
-            } catch (_: ClassNotFoundException) {
+            val clz = ClassFinders.findClass(clsName, classLoader)
+            if (clz == null) {
                 module.log(Log.WARN, tag, "Class $clsName not found for $methodName, trying next")
-            } catch (t: Throwable) {
-                module.log(Log.WARN, tag, "Failed to hook $clsName.$methodName: ${t.message}")
+                continue
+            }
+            var hooked = false
+            for (m in clz.declaredMethods) {
+                if (m.name != methodName) continue
+                module.hook(m)
+                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                    .intercept { chain ->
+                        if (shouldBlock(m, chain)) {
+                            module.log(Log.INFO, tag, "Blocked $methodName")
+                            return@intercept 0
+                        }
+                        chain.proceed()
+                    }
+                hooked = true
+            }
+            if (hooked) {
+                module.log(Log.INFO, tag, "Hooked $clsName.$methodName")
+                return
             }
         }
         module.log(Log.WARN, tag, "ALL candidates failed for $methodName — no Athena kill interception")

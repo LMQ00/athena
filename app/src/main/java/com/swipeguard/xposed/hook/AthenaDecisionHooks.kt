@@ -217,7 +217,7 @@ class AthenaDecisionHooks(
      * - [a4/t] O0/P0/i1（清除引擎直调）
      * - [x3/m] f（深度清理）
      * - [x3/s0] I0
-     * - [s.b]（薄包装，被 h1.i/h1.j/ForceStopStrategy.e/x3/* 共 12 处调用）
+     * - [s.b]（薄包装，被 h1.i/h1.j/ForceStopStrategy.e 及 x3 系列共 12 处调用）
      *
      * 目标签名（smali L127 确认）：
      * ```java
