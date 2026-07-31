@@ -24,9 +24,13 @@ concurrency:
 
 env:
   ANDROID_HOME: ${{ github.workspace }}/android-sdk
-  # libxposed:service:102.0.0 要求 compileSdk >= 37；CinnamonBun 预览包已移除，
-  # 用正式版 platforms;android-37（无需 canary 通道）。
-  SDK_PLATFORM: "platforms;android-37"
+  # libxposed:service:102.0.0 要求 compileSdk >= 37。
+  # compileSdkMinor=0 → AGP 用 platforms/android-37.0。直接下载 zip 解压，
+  # 避免 sdkmanager 包名（裸 android-37 / CinnamonBun 均不可用）与许可证交互问题。
+  SDK_PLATFORM_ZIP: "https://dl.google.com/android/repository/platform-37.0_r02.zip"
+  # build-tools 36/37 都装（AGP 8.13 默认 36.x；compileSdk 37 可匹配 37.0.0）。
+  BUILD_TOOLS_36: "https://dl.google.com/android/repository/build-tools_r36_linux.zip"
+  BUILD_TOOLS_37: "https://dl.google.com/android/repository/build-tools_r37_linux.zip"
 
 jobs:
   validate:
@@ -53,21 +57,18 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Install Android SDK ${{ env.SDK_PLATFORM }}
+      - name: Install Android SDK 37.0
         run: |
-          mkdir -p "$ANDROID_HOME"
-          cd /tmp
-          curl -sSLO https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -qq commandlinetools-linux-11076708_latest.zip
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
-          mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
-          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
-
-          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses || true
-          sdkmanager --sdk_root="$ANDROID_HOME" "$SDK_PLATFORM"
+          mkdir -p "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
+          curl -sSLO "$SDK_PLATFORM_ZIP"
+          unzip -qq platform-37.0_r02.zip -d "$ANDROID_HOME/platforms"
+          curl -sSLO "$BUILD_TOOLS_36"
+          unzip -qq build-tools_r36_linux.zip -d "$ANDROID_HOME/build-tools/36.0.0"
+          curl -sSLO "$BUILD_TOOLS_37"
+          unzip -qq build-tools_r37_linux.zip -d "$ANDROID_HOME/build-tools/37.0.0"
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Run lint
@@ -109,21 +110,18 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Install Android SDK ${{ env.SDK_PLATFORM }}
+      - name: Install Android SDK 37.0
         run: |
-          mkdir -p "$ANDROID_HOME"
-          cd /tmp
-          curl -sSLO https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -qq commandlinetools-linux-11076708_latest.zip
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
-          mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
-          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
-
-          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses || true
-          sdkmanager --sdk_root="$ANDROID_HOME" "$SDK_PLATFORM"
+          mkdir -p "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
+          curl -sSLO "$SDK_PLATFORM_ZIP"
+          unzip -qq platform-37.0_r02.zip -d "$ANDROID_HOME/platforms"
+          curl -sSLO "$BUILD_TOOLS_36"
+          unzip -qq build-tools_r36_linux.zip -d "$ANDROID_HOME/build-tools/36.0.0"
+          curl -sSLO "$BUILD_TOOLS_37"
+          unzip -qq build-tools_r37_linux.zip -d "$ANDROID_HOME/build-tools/37.0.0"
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Grant execute permission

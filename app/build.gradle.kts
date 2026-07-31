@@ -7,10 +7,11 @@ plugins {
 
 android {
     namespace = "com.swipeguard.xposed"
-    // libxposed:service:102.0.0 的 AAR metadata 要求 compileSdk >= 37，故不能降 36。
-    // 用正式版 platforms;android-37（CinnamonBun 预览包已从 Google 仓库移除）。
-    // AGP 8.13 对 compileSdk 37 仅警告未测试，可编译。
+    // libxposed:service:102.0.0 要求 compileSdk >= 37。
+    // compileSdkMinor=0 → AGP 查找 platforms/android-37.0（正式包名，默认仓库可用；
+    // 裸 android-37 与 CinnamonBun 预览包均不存在/已移除）。
     compileSdk = 37
+    compileSdkMinor = 0
 
 
     signingConfigs {
