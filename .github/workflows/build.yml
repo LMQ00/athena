@@ -24,7 +24,9 @@ concurrency:
 
 env:
   ANDROID_HOME: ${{ github.workspace }}/android-sdk
-  SDK_PLATFORM: "platforms;android-CinnamonBun"
+  # libxposed:service:102.0.0 要求 compileSdk >= 37；CinnamonBun 预览包已移除，
+  # 用正式版 platforms;android-37（无需 canary 通道）。
+  SDK_PLATFORM: "platforms;android-37"
 
 jobs:
   validate:
@@ -61,8 +63,8 @@ jobs:
           mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
 
-          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses --channel=3 || true
-          sdkmanager --sdk_root="$ANDROID_HOME" --channel=3 "$SDK_PLATFORM"
+          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses || true
+          sdkmanager --sdk_root="$ANDROID_HOME" "$SDK_PLATFORM"
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
@@ -117,8 +119,8 @@ jobs:
           mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
 
-          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses --channel=3 || true
-          sdkmanager --sdk_root="$ANDROID_HOME" --channel=3 "$SDK_PLATFORM"
+          yes 2>/dev/null | sdkmanager --sdk_root="$ANDROID_HOME" --licenses || true
+          sdkmanager --sdk_root="$ANDROID_HOME" "$SDK_PLATFORM"
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
