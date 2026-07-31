@@ -51,7 +51,7 @@ jobs:
             echo "  base64 release.keystore  # paste as RELEASE_KEYSTORE_BASE64"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
